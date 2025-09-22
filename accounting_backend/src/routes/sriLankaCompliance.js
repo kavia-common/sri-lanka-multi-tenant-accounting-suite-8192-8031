@@ -36,8 +36,12 @@ const router = express.Router();
  *       - in: query
  *         name: include_transactions
  *         schema: { type: boolean }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, pdf] }
+ *         description: Set to 'pdf' to stream a branded PDF. Defaults to 'json'.
  *     responses:
- *       200: { description: VAT return generated }
+ *       200: { description: VAT return generated (JSON or PDF) }
  */
 router.get('/lk/vat-return', authenticateToken, validateCompanyAccess, controller.vatReturn);
 
@@ -63,7 +67,11 @@ router.get('/lk/vat-return', authenticateToken, validateCompanyAccess, controlle
  *         required: true
  *         schema: { type: string, format: date }
  *     responses:
- *       200: { description: Income tax schedule generated }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, pdf] }
+ *         description: Set to 'pdf' to stream a branded PDF. Defaults to 'json'.
+ *       200: { description: Income tax schedule generated (JSON or PDF) }
  */
 router.get('/lk/income-tax', authenticateToken, validateCompanyAccess, controller.incomeTax);
 
@@ -92,7 +100,11 @@ router.get('/lk/income-tax', authenticateToken, validateCompanyAccess, controlle
  *         name: include_transactions
  *         schema: { type: boolean }
  *     responses:
- *       200: { description: WHT statement generated }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, pdf] }
+ *         description: Set to 'pdf' to stream a branded PDF. Defaults to 'json'.
+ *       200: { description: WHT statement generated (JSON or PDF) }
  */
 router.get('/lk/wht-statement', authenticateToken, validateCompanyAccess, controller.whtStatement);
 
@@ -118,7 +130,11 @@ router.get('/lk/wht-statement', authenticateToken, validateCompanyAccess, contro
  *         required: true
  *         schema: { type: string, format: date }
  *     responses:
- *       200: { description: EPF/ETF report generated }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, pdf] }
+ *         description: Set to 'pdf' to stream a branded PDF. Defaults to 'json'.
+ *       200: { description: EPF/ETF report generated (JSON or PDF) }
  */
 router.get('/lk/epf-etf', authenticateToken, validateCompanyAccess, controller.epfEtf);
 
@@ -142,7 +158,11 @@ router.get('/lk/epf-etf', authenticateToken, validateCompanyAccess, controller.e
  *         name: include_previous_year
  *         schema: { type: boolean }
  *     responses:
- *       200: { description: Annual financials generated }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, pdf] }
+ *         description: Set to 'pdf' to stream a branded PDF. Defaults to 'json'.
+ *       200: { description: Annual financials generated (JSON or PDF) }
  */
 router.get('/lk/annual-financials', authenticateToken, validateCompanyAccess, controller.annualFinancials);
 
