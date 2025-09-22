@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   description TEXT NOT NULL,
   reference TEXT,
   total_amount NUMERIC(18,2) NOT NULL,
+  type TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -78,6 +79,27 @@ CREATE TABLE IF NOT EXISTS audit_trail (
   entity_id UUID,
   details JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Optional audit_log used by DoubleEntryEngine (non-critical)
+CREATE TABLE IF NOT EXISTS audit_log (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+  entity_type TEXT NOT NULL,
+  entity_id UUID,
+  action TEXT NOT NULL,
+  performed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  metadata JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Optional budgets table for budget vs actuals
+CREATE TABLE IF NOT EXISTS budgets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  period DATE NOT NULL,
+  amount NUMERIC(18,2) NOT NULL DEFAULT 0
 );
 
 /* Recommended: Enable RLS on tables and define policies (not enabled by default here) */

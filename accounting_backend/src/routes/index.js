@@ -7,6 +7,7 @@ const companyRoutes = require('./companies');
 const accountRoutes = require('./accounts');
 const transactionRoutes = require('./transactions');
 const reportRoutes = require('./reports');
+const advancedReportRoutes = require('./advancedReports');
 
 const router = express.Router();
 
@@ -47,5 +48,6 @@ router.use('/api/companies', companyRoutes);
 router.use('/api/accounts', accountRoutes);
 router.use('/api/transactions', transactionRoutes);
 router.use('/api/reports', reportRoutes);
+router.use('/api/reports', advancedReportRoutes); // exposes /api/reports/v2/*
 
 module.exports = router;
