@@ -1,15 +1,29 @@
 const ReportingService = require('../services/ReportingService');
+const ExcelService = require('../services/ExcelService');
 
 class ReportsController {
   /**
-   * Generate trial balance report (basic)
-   * Query: start_date?, end_date?
+   * Generate trial balance report (basic) with optional Excel export
+   * Query: start_date?, end_date?, format?=json|xlsx
    */
   // PUBLIC_INTERFACE
   async getTrialBalance(req, res) {
     try {
-      const { start_date, end_date } = req.query;
+      const { start_date, end_date, format } = req.query;
       const data = await ReportingService.getTrialBalance(req.companyId, { start_date, end_date });
+
+      if ((format || '').toLowerCase() === 'xlsx') {
+        const buffer = await ExcelService.buildTrialBalanceWorkbook({
+          company: req.company || { name: req.companyName || 'Company' },
+          params: { start_date, end_date },
+          data,
+        });
+        const fileName = `trial-balance_${start_date || 'start'}_${end_date || 'end'}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        return res.send(Buffer.from(buffer));
+      }
+
       res.json({
         status: 'success',
         data: {
@@ -33,14 +47,27 @@ class ReportsController {
   }
 
   /**
-   * Generate balance sheet report (basic)
-   * Query: as_of_date?
+   * Generate balance sheet report (basic) with optional Excel export
+   * Query: as_of_date?, format?=json|xlsx
    */
   // PUBLIC_INTERFACE
   async getBalanceSheet(req, res) {
     try {
-      const { as_of_date } = req.query;
+      const { as_of_date, format } = req.query;
       const data = await ReportingService.getBalanceSheet(req.companyId, { as_of_date });
+
+      if ((format || '').toLowerCase() === 'xlsx') {
+        const buffer = await ExcelService.buildBalanceSheetWorkbook({
+          company: req.company || { name: req.companyName || 'Company' },
+          params: { as_of_date },
+          data,
+        });
+        const fileName = `balance-sheet_${as_of_date || 'as-of-today'}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        return res.send(Buffer.from(buffer));
+      }
+
       res.json({
         status: 'success',
         data: {
@@ -63,14 +90,27 @@ class ReportsController {
   }
 
   /**
-   * Generate profit and loss report (basic)
-   * Query: start_date, end_date
+   * Generate profit and loss report (basic) with optional Excel export
+   * Query: start_date, end_date, format?=json|xlsx
    */
   // PUBLIC_INTERFACE
   async getProfitLoss(req, res) {
     try {
-      const { start_date, end_date } = req.query;
+      const { start_date, end_date, format } = req.query;
       const data = await ReportingService.getProfitLoss(req.companyId, { start_date, end_date });
+
+      if ((format || '').toLowerCase() === 'xlsx') {
+        const buffer = await ExcelService.buildProfitLossWorkbook({
+          company: req.company || { name: req.companyName || 'Company' },
+          params: { start_date, end_date },
+          data,
+        });
+        const fileName = `profit-loss_${start_date}_${end_date}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        return res.send(Buffer.from(buffer));
+      }
+
       res.json({
         status: 'success',
         data: {

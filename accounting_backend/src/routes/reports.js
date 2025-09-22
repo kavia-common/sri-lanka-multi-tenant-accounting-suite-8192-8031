@@ -33,6 +33,12 @@ const router = express.Router();
  *         schema:
  *           type: string
  *           format: date
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [json, xlsx]
+ *         description: When set to xlsx, returns a branded Excel workbook
  *     responses:
  *       200:
  *         description: Trial balance generated successfully
