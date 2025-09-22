@@ -1,4 +1,5 @@
 const app = require('./app');
+const { initScheduler } = require('./scheduler');
 
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -7,6 +8,12 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`Server running at http://${HOST}:${PORT}`);
   console.log(`API Documentation available at http://${HOST}:${PORT}/docs`);
   console.log(`OpenAPI JSON available at http://${HOST}:${PORT}/openapi.json`);
+  // Initialize background scheduler after server starts
+  try {
+    initScheduler();
+  } catch (e) {
+    console.error('Failed to initialize scheduler', e);
+  }
 });
 
 // Graceful shutdown

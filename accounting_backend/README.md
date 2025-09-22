@@ -171,6 +171,18 @@ Assets, Liabilities, and Equity as of a specific date.
 ### Profit & Loss
 Revenue and expenses for a date range with net income calculation.
 
+### Report Email Scheduling
+- Create and manage schedules to email reports periodically (daily/weekly/monthly/custom).
+- Endpoints:
+  - GET /api/schedules
+  - POST /api/schedules
+  - GET /api/schedules/:id
+  - PUT /api/schedules/:id
+  - DELETE /api/schedules/:id
+  - GET /api/schedules/:id/logs
+  - POST /api/schedules/:id/trigger
+- Requires SMTP environment variables (see .env.example). A background scheduler runs every minute to deliver due reports.
+
 ## 🔧 Configuration
 
 ### Environment Variables
