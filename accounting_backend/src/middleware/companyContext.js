@@ -22,7 +22,7 @@ const validateCompanyAccess = async (req, res, next) => {
 
     // Validate that user has access to this company
     const accessQuery = `
-      SELECT c.id, c.name, c.code, uc.role, uc.permissions
+      SELECT c.id, c.name, c.code, uc.role
       FROM companies c
       INNER JOIN user_companies uc ON c.id = uc.company_id
       WHERE c.id = $1 AND uc.user_id = $2 AND c.is_active = true

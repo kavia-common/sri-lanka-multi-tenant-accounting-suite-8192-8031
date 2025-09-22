@@ -1,3 +1,4 @@
+'use strict';
 /**
  * Global error handling middleware
  * @param {Error} err - Error object

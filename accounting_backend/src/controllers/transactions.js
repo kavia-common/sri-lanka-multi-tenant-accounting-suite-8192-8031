@@ -166,14 +166,27 @@ class TransactionsController {
 
         journalEntries.push(entryResult.rows[0]);
 
-        // Update account balance
-        const balanceChange = (entry.debit_amount || 0) - (entry.credit_amount || 0);
+        // Update account balance (Assets/Expenses increase with debits; Liabilities/Equity/Revenue increase with credits)
+        const accountTypeRes = await client.query(
+          'SELECT type FROM accounts WHERE id = $1',
+          [entry.account_id]
+        );
+        const accountType = accountTypeRes.rows[0]?.type;
+        const debit = Number(entry.debit_amount || 0);
+        const credit = Number(entry.credit_amount || 0);
+        let delta = 0;
+        if (accountType === 'ASSET' || accountType === 'EXPENSE') {
+          delta = debit - credit;
+        } else {
+          delta = credit - debit;
+        }
+
         const updateBalanceQuery = `
           UPDATE accounts 
           SET balance = balance + $1, updated_at = NOW()
           WHERE id = $2 AND company_id = $3
         `;
-        await client.query(updateBalanceQuery, [balanceChange, entry.account_id, req.companyId]);
+        await client.query(updateBalanceQuery, [delta, entry.account_id, req.companyId]);
       }
 
       await client.query('COMMIT');

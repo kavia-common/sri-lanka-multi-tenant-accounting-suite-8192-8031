@@ -4,9 +4,9 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Multi-Tenant Accounting API',
-      version: '1.0.0',
-      description: 'A comprehensive REST API for multi-tenant accounting software with double-entry bookkeeping, company management, and financial reporting.',
+      title: process.env.SWAGGER_TITLE || 'Multi-Tenant Accounting API',
+      version: process.env.SWAGGER_VERSION || '1.0.0',
+      description: process.env.SWAGGER_DESCRIPTION || 'A comprehensive REST API for multi-tenant accounting software with double-entry bookkeeping, company management, and financial reporting.',
       contact: {
         name: 'API Support',
         email: 'support@accounting-api.com'
@@ -18,7 +18,7 @@ const options = {
     },
     servers: [
       {
-        url: 'http://localhost:3001',
+        url: process.env.API_BASE_URL || 'http://localhost:3001',
         description: 'Development server'
       }
     ],

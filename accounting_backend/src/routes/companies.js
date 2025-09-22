@@ -31,10 +31,6 @@ const router = express.Router();
  *           type: string
  *         role:
  *           type: string
- *         permissions:
- *           type: array
- *           items:
- *             type: string
  *         created_at:
  *           type: string
  *           format: date-time

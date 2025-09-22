@@ -11,7 +11,7 @@ class CompanyController {
     try {
       const companiesQuery = `
         SELECT c.id, c.name, c.code, c.email, c.phone, c.address, c.tax_number,
-               c.created_at, c.updated_at, uc.role, uc.permissions
+               c.created_at, c.updated_at, uc.role
         FROM companies c
         INNER JOIN user_companies uc ON c.id = uc.company_id
         WHERE uc.user_id = $1 AND c.is_active = true
@@ -79,8 +79,8 @@ class CompanyController {
 
       // Add user as company owner
       const addUserCompanyQuery = `
-        INSERT INTO user_companies (user_id, company_id, role, permissions, created_at)
-        VALUES ($1, $2, 'OWNER', '["ALL"]', NOW())
+        INSERT INTO user_companies (user_id, company_id, role, created_at)
+        VALUES ($1, $2, 'OWNER', NOW())
       `;
       
       await client.query(addUserCompanyQuery, [req.user.userId, newCompany.id]);
@@ -96,8 +96,7 @@ class CompanyController {
         data: {
           company: {
             ...newCompany,
-            role: 'OWNER',
-            permissions: ['ALL']
+            role: 'OWNER'
           }
         }
       });
@@ -136,7 +135,7 @@ class CompanyController {
 
       const companyQuery = `
         SELECT c.id, c.name, c.code, c.email, c.phone, c.address, c.tax_number,
-               c.created_at, c.updated_at, uc.role, uc.permissions
+               c.created_at, c.updated_at, uc.role
         FROM companies c
         INNER JOIN user_companies uc ON c.id = uc.company_id
         WHERE c.id = $1 AND uc.user_id = $2 AND c.is_active = true

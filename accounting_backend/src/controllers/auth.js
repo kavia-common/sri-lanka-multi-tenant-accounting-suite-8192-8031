@@ -56,7 +56,7 @@ class AuthController {
 
       // Get user's companies
       const companiesQuery = `
-        SELECT c.id, c.name, c.code, uc.role, uc.permissions
+        SELECT c.id, c.name, c.code, uc.role
         FROM companies c
         INNER JOIN user_companies uc ON c.id = uc.company_id
         WHERE uc.user_id = $1 AND c.is_active = true
