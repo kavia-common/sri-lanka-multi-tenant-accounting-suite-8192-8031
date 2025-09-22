@@ -1,331 +1,314 @@
+'use strict';
+
 const ReportingService = require('../services/ReportingService');
 const ExcelService = require('../services/ExcelService');
 
+/**
+ * AdvancedReportsController
+ * Adds comparative analysis and budget vs actual across all reports.
+ * Query params:
+ *  - period[]: array of ISO dates or start..end ranges for primary period(s)
+ *  - compare_to[]: array of ISO dates or ranges for comparative period(s)
+ *  - fiscal_year: string e.g., 2024 (used when period is not specified) - service will map to start/end based on company fiscal setup (baseline: Jan-Dec)
+ *  - budget_source: string e.g., 'table:budgets' or 'zero' or 'prior_year'
+ *  - format: json|xlsx
+ * For each report, emits actual, budget, variance, variancePercent columns in lines or summaries when applicable.
+ */
 class AdvancedReportsController {
-  /**
-   * PUBLIC_INTERFACE
-   * Generate Trial Balance with optional drill-down and zero-balance inclusion.
-   * Query: start_date?, end_date?, include_zero?, drilldown?, format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async trialBalance(req, res) {
     try {
-      const { start_date, end_date, include_zero, drilldown, format } = req.query;
-      const data = await ReportingService.getTrialBalance(req.companyId, {
-        start_date,
-        end_date,
-        include_zero: include_zero === 'true',
-        drilldown: drilldown === 'true',
-      });
+      const { period, compare_to, budget_source, fiscal_year, format } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year),
+        comparePeriods: normalizePeriods(compare_to, null),
+        budget_source: budget_source || 'table:budgets',
+      };
+      const data = await ReportingService.getTrialBalanceAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
         const buffer = await ExcelService.buildTrialBalanceWorkbook({
           company: req.company || { name: req.companyName || 'Company' },
-          params: { start_date, end_date },
-          data,
+          params: { start_date: data.meta?.base?.start_date, end_date: data.meta?.base?.end_date },
+          data: data.payload,
         });
-        const fileName = `trial-balance_${start_date || 'start'}_${end_date || 'end'}.xlsx`;
+        const fileName = `trial-balance-adv_${data.meta?.base?.start_date || 'start'}_${data.meta?.base?.end_date || 'end'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('trialBalance error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate trial balance' });
+    } catch (err) {
+      console.error('Advanced TB error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced trial balance', code: 'ADV_TB_ERROR' });
     }
   }
 
-  /**
-   * PUBLIC_INTERFACE
-   * Generate Balance Sheet with optional comparative period.
-   * Query: as_of_date?, comparative?, compare_as_of_date?, format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async balanceSheet(req, res) {
     try {
-      const { as_of_date, comparative, compare_as_of_date, format } = req.query;
-      const data = await ReportingService.getBalanceSheet(req.companyId, {
-        as_of_date,
-        comparative: comparative === 'true',
-        compare_as_of_date,
-      });
+      const { period, compare_to, budget_source, fiscal_year, format } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year, { balanceSheet: true }),
+        comparePeriods: normalizePeriods(compare_to, null, { balanceSheet: true }),
+        budget_source: budget_source || 'table:budgets',
+      };
+      const data = await ReportingService.getBalanceSheetAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
         const buffer = await ExcelService.buildBalanceSheetWorkbook({
           company: req.company || { name: req.companyName || 'Company' },
-          params: { as_of_date },
-          data,
+          params: { as_of_date: data.meta?.base?.as_of_date },
+          data: data.payload,
         });
-        const fileName = `balance-sheet_${as_of_date || 'as-of-today'}.xlsx`;
+        const fileName = `balance-sheet-adv_${data.meta?.base?.as_of_date || 'as-of-today'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('balanceSheet error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate balance sheet' });
+    } catch (err) {
+      console.error('Advanced BS error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced balance sheet', code: 'ADV_BS_ERROR' });
     }
   }
 
-  /**
-   * PUBLIC_INTERFACE
-   * Generate Profit & Loss with optional comparative and drilldown.
-   * Query: start_date, end_date, comparative?, compare_start_date?, compare_end_date?, drilldown?, format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async profitLoss(req, res) {
     try {
-      const { start_date, end_date, comparative, compare_start_date, compare_end_date, drilldown, format } = req.query;
-      const data = await ReportingService.getProfitLoss(req.companyId, {
-        start_date,
-        end_date,
-        comparative: comparative === 'true',
-        compare_start_date,
-        compare_end_date,
-        drilldown: drilldown === 'true',
-      });
+      const { period, compare_to, budget_source, fiscal_year, format } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year),
+        comparePeriods: normalizePeriods(compare_to, null),
+        budget_source: budget_source || 'table:budgets',
+      };
+      const data = await ReportingService.getProfitLossAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
+        const base = data.meta?.base || {};
         const buffer = await ExcelService.buildProfitLossWorkbook({
           company: req.company || { name: req.companyName || 'Company' },
-          params: { start_date, end_date },
-          data,
+          params: { start_date: base.start_date, end_date: base.end_date },
+          data: data.payload,
         });
-        const fileName = `profit-loss_${start_date}_${end_date}.xlsx`;
+        const fileName = `profit-loss-adv_${base.start_date || 'start'}_${base.end_date || 'end'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('profitLoss error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate profit & loss' });
+    } catch (err) {
+      console.error('Advanced P&L error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced profit & loss', code: 'ADV_PL_ERROR' });
     }
   }
 
-  /**
-   * PUBLIC_INTERFACE
-   * General Ledger view with pagination and filters.
-   * Query: start_date?, end_date?, account_id?, account_code?, page?, limit?, format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async generalLedger(req, res) {
     try {
-      const { start_date, end_date, account_id, account_code, page, limit, format } = req.query;
-      const data = await ReportingService.getGeneralLedger(req.companyId, {
-        start_date,
-        end_date,
+      const { period, compare_to, fiscal_year, format, account_id, account_code, page, limit } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year),
+        comparePeriods: normalizePeriods(compare_to, null),
+        paging: { page, limit },
         account_id,
         account_code,
-        page: page ? Number(page) : undefined,
-        limit: limit ? Number(limit) : undefined,
-      });
+      };
+      const data = await ReportingService.getGeneralLedgerAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
+        const base = data.meta?.base || {};
         const buffer = await ExcelService.buildLedgerWorkbook({
           company: req.company || { name: req.companyName || 'Company' },
-          params: { start_date, end_date, account_id, account_code },
-          data,
+          params: { start_date: base.start_date, end_date: base.end_date },
+          data: data.payload,
         });
-        const fileName = `general-ledger_${start_date || 'all'}_${end_date || 'all'}.xlsx`;
+        const fileName = `general-ledger-adv_${base.start_date || 'start'}_${base.end_date || 'end'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('generalLedger error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate general ledger' });
+    } catch (err) {
+      console.error('Advanced GL error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced general ledger', code: 'ADV_GL_ERROR' });
     }
   }
 
-  /**
-   * PUBLIC_INTERFACE
-   * Cash Flow Statement (indirect method).
-   * Query: start_date, end_date, format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async cashFlow(req, res) {
     try {
-      const { start_date, end_date, format } = req.query;
-      const data = await ReportingService.getCashFlow(req.companyId, { start_date, end_date });
+      const { period, compare_to, fiscal_year, format } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year),
+        comparePeriods: normalizePeriods(compare_to, null),
+      };
+      const data = await ReportingService.getCashFlowAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
+        const base = data.meta?.base || {};
         const buffer = await ExcelService.buildCashFlowWorkbook({
           company: req.company || { name: req.companyName || 'Company' },
-          params: { start_date, end_date },
-          data,
+          params: { start_date: base.start_date, end_date: base.end_date },
+          data: data.payload,
         });
-        const fileName = `cash-flow_${start_date}_${end_date}.xlsx`;
+        const fileName = `cash-flow-adv_${base.start_date || 'start'}_${base.end_date || 'end'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('cashFlow error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate cash flow' });
+    } catch (err) {
+      console.error('Advanced CF error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced cash flow', code: 'ADV_CF_ERROR' });
     }
   }
 
-  /**
-   * PUBLIC_INTERFACE
-   * Statement of Changes in Equity.
-   * Query: start_date, end_date, format?=json|xlsx
-   */
-  async changesInEquity(req, res) {
-    try {
-      const { start_date, end_date, format } = req.query;
-      const data = await ReportingService.getChangesInEquity(req.companyId, { start_date, end_date });
-
-      if ((format || '').toLowerCase() === 'xlsx') {
-        const headers = ['Code', 'Name', 'Amount'];
-        const rows = (data?.changesInEquity || []).map(l => [l.code, l.name, Number(l.amount || 0)]);
-        const buffer = await ExcelService.buildSimpleKeyAmountWorkbook({
-          title: 'Statement of Changes in Equity',
-          company: req.company || { name: req.companyName || 'Company' },
-          headers,
-          rows,
-          numberIndexes: [3],
-          params: { start_date, end_date },
-        });
-        const fileName = `changes-in-equity_${start_date}_${end_date}.xlsx`;
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-        return res.send(Buffer.from(buffer));
-      }
-
-      res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('changesInEquity error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate changes in equity' });
-    }
-  }
-
-  /**
-   * PUBLIC_INTERFACE
-   * Aged Receivables with default buckets (30/60/90/120).
-   * Query: as_of_date?, buckets? (comma-separated), format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async agedReceivables(req, res) {
     try {
-      const { as_of_date, buckets, format } = req.query;
-      const parsedBuckets = buckets ? buckets.split(',').map(x => Number(x.trim())).filter(x => Number.isFinite(x)) : undefined;
-      const data = await ReportingService.getAgedReceivables(req.companyId, { as_of_date, buckets: parsedBuckets });
+      const { period, fiscal_year, buckets, format } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year, { balanceSheet: true }),
+        buckets: parseBuckets(buckets),
+      };
+      const data = await ReportingService.getAgedReceivablesAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
-        const headers = ['Bucket', 'Amount'];
-        const ar = data?.agedReceivables || {};
-        const rows = [
-          ['Current', Number(ar.current || 0)],
-          [`${(parsedBuckets || [30])[0]}d`, Number(ar[`${(parsedBuckets || [30, 60, 90])[0]}d`] || 0)],
-          [`${(parsedBuckets || [30, 60])[1] || 60}d`, Number(ar[`${(parsedBuckets || [30, 60])[1] || 60}d`] || 0)],
-          [`${(parsedBuckets || [30, 60, 90])[2] || 90}d`, Number(ar[`${(parsedBuckets || [30, 60, 90])[2] || 90}d`] || 0)],
-          ['Over', Number(ar.over || 0)],
-        ];
+        const rows = [['Current', data.payload.agedReceivables.current], [`${data.meta.bucketLabels[0]}`, data.payload.agedReceivables[data.meta.bucketLabels[0]]], [`${data.meta.bucketLabels[1]}`, data.payload.agedReceivables[data.meta.bucketLabels[1]]], [`${data.meta.bucketLabels[2]}`, data.payload.agedReceivables[data.meta.bucketLabels[2]]], ['Over', data.payload.agedReceivables.over]];
         const buffer = await ExcelService.buildSimpleKeyAmountWorkbook({
           title: 'Aged Receivables',
           company: req.company || { name: req.companyName || 'Company' },
-          headers,
+          headers: ['Bucket', 'Amount'],
           rows,
           numberIndexes: [2],
-          params: { as_of_date },
+          params: { as_of_date: data.meta?.base?.as_of_date },
         });
-        const fileName = `aged-receivables_${as_of_date || 'as-of-today'}.xlsx`;
+        const fileName = `aged-receivables-adv_${data.meta?.base?.as_of_date || 'as-of-today'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('agedReceivables error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate aged receivables' });
+    } catch (err) {
+      console.error('Advanced AR error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced aged receivables', code: 'ADV_AR_ERROR' });
     }
   }
 
-  /**
-   * PUBLIC_INTERFACE
-   * Aged Payables with default buckets (30/60/90/120).
-   * Query: as_of_date?, buckets? (comma-separated), format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async agedPayables(req, res) {
     try {
-      const { as_of_date, buckets, format } = req.query;
-      const parsedBuckets = buckets ? buckets.split(',').map(x => Number(x.trim())).filter(x => Number.isFinite(x)) : undefined;
-      const data = await ReportingService.getAgedPayables(req.companyId, { as_of_date, buckets: parsedBuckets });
+      const { period, fiscal_year, buckets, format } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year, { balanceSheet: true }),
+        buckets: parseBuckets(buckets),
+      };
+      const data = await ReportingService.getAgedPayablesAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
-        const headers = ['Bucket', 'Amount'];
-        const ap = data?.agedPayables || {};
-        const rows = [
-          ['Current', Number(ap.current || 0)],
-          [`${(parsedBuckets || [30])[0]}d`, Number(ap[`${(parsedBuckets || [30, 60, 90])[0]}d`] || 0)],
-          [`${(parsedBuckets || [30, 60])[1] || 60}d`, Number(ap[`${(parsedBuckets || [30, 60])[1] || 60}d`] || 0)],
-          [`${(parsedBuckets || [30, 60, 90])[2] || 90}d`, Number(ap[`${(parsedBuckets || [30, 60, 90])[2] || 90}d`] || 0)],
-          ['Over', Number(ap.over || 0)],
-        ];
+        const rows = [['Current', data.payload.agedPayables.current], [`${data.meta.bucketLabels[0]}`, data.payload.agedPayables[data.meta.bucketLabels[0]]], [`${data.meta.bucketLabels[1]}`, data.payload.agedPayables[data.meta.bucketLabels[1]]], [`${data.meta.bucketLabels[2]}`, data.payload.agedPayables[data.meta.bucketLabels[2]]], ['Over', data.payload.agedPayables.over]];
         const buffer = await ExcelService.buildSimpleKeyAmountWorkbook({
           title: 'Aged Payables',
           company: req.company || { name: req.companyName || 'Company' },
-          headers,
+          headers: ['Bucket', 'Amount'],
           rows,
           numberIndexes: [2],
-          params: { as_of_date },
+          params: { as_of_date: data.meta?.base?.as_of_date },
         });
-        const fileName = `aged-payables_${as_of_date || 'as-of-today'}.xlsx`;
+        const fileName = `aged-payables-adv_${data.meta?.base?.as_of_date || 'as-of-today'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('agedPayables error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate aged payables' });
+    } catch (err) {
+      console.error('Advanced AP error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced aged payables', code: 'ADV_AP_ERROR' });
     }
   }
 
-  /**
-   * PUBLIC_INTERFACE
-   * Budget vs Actuals baseline (supports missing budgets table).
-   * Query: start_date, end_date, format?=json|xlsx
-   */
+  // PUBLIC_INTERFACE
   async budgetVsActual(req, res) {
     try {
-      const { start_date, end_date, format } = req.query;
-      const data = await ReportingService.getBudgetVsActual(req.companyId, { start_date, end_date });
+      const { period, fiscal_year, budget_source, format } = req.query;
+      const params = {
+        periods: normalizePeriods(period, fiscal_year),
+        budget_source: budget_source || 'table:budgets',
+      };
+      const data = await ReportingService.getBudgetVsActualAdvanced(req.companyId, params);
 
       if ((format || '').toLowerCase() === 'xlsx') {
-        const headers = ['Code', 'Name', 'Type', 'Budget', 'Actual', 'Variance', 'Variance %'];
-        const rows = (data?.budgetVsActual || []).map(l => [
-          l.code, l.name, l.type,
-          Number(l.budget || 0), Number(l.actual || 0),
-          Number(l.variance || 0),
-          l.variancePercent ? Number(l.variancePercent) / 100 : 0,
-        ]);
-        const buffer = await ExcelService.buildSimpleKeyAmountWorkbook({
-          title: 'Budget vs Actuals',
+        // Reuse P&L workbook for structure
+        const base = data.meta?.base || {};
+        const payload = {
+          profitLoss: {
+            revenue: data.payload.lines.filter(l => l.type === 'REVENUE').map(l => ({ code: l.code, name: l.name, amount: l.actual })),
+            expenses: data.payload.lines.filter(l => l.type === 'EXPENSE').map(l => ({ code: l.code, name: l.name, amount: l.actual })),
+          },
+          summary: {
+            totalRevenue: data.payload.summary.totalActualRevenue,
+            totalExpenses: data.payload.summary.totalActualExpenses,
+            netIncome: data.payload.summary.netActualIncome,
+          },
+        };
+        const buffer = await ExcelService.buildProfitLossWorkbook({
           company: req.company || { name: req.companyName || 'Company' },
-          headers,
-          rows,
-          numberIndexes: [4, 5, 6, 7],
-          params: { start_date, end_date },
+          params: { start_date: base.start_date, end_date: base.end_date },
+          data: payload,
         });
-        const fileName = `budget-vs-actual_${start_date}_${end_date}.xlsx`;
+        const fileName = `budget-vs-actual-adv_${base.start_date || 'start'}_${base.end_date || 'end'}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
         return res.send(Buffer.from(buffer));
       }
 
       res.json({ status: 'success', data });
-    } catch (e) {
-      console.error('budgetVsActual error', e);
-      res.status(e.status || 500).json({ status: 'error', message: e.message || 'Failed to generate budget vs actual' });
+    } catch (err) {
+      console.error('Advanced BvA error:', err);
+      res.status(err.status || 500).json({ status: 'error', message: 'Failed to generate advanced budget vs actual', code: 'ADV_BVA_ERROR' });
     }
   }
+}
+
+function normalizePeriods(period, fiscal_year, opts = {}) {
+  // Accepts:
+  //  - period[]=YYYY-MM-DD..YYYY-MM-DD or single YYYY-MM-DD (as_of)
+  //  - If not provided and fiscal_year provided: map to Jan 1..Dec 31 of that year (baseline)
+  const arr = Array.isArray(period) ? period : (period ? [period] : []);
+  if (arr.length === 0 && fiscal_year) {
+    if (opts.balanceSheet) {
+      return [{ as_of_date: `${fiscal_year}-12-31` }];
+    }
+    return [{ start_date: `${fiscal_year}-01-01`, end_date: `${fiscal_year}-12-31` }];
+  }
+  return arr.map(p => {
+    if (String(p).includes('..')) {
+      const [sd, ed] = String(p).split('..');
+      if (opts.balanceSheet) {
+        return { as_of_date: ed || sd };
+      }
+      return { start_date: sd, end_date: ed };
+    }
+    // single date -> as_of for BS or map to one-day window for PL/GL
+    if (opts.balanceSheet) {
+      return { as_of_date: p };
+    }
+    return { start_date: p, end_date: p };
+  });
+}
+
+function parseBuckets(b) {
+  if (!b) return [30, 60, 90, 120];
+  if (Array.isArray(b)) return b.map(x => Number(x)).filter(x => Number.isFinite(x)).sort((a, z) => a - z);
+  return String(b).split(',').map(x => Number(x.trim())).filter(x => Number.isFinite(x)).sort((a, z) => a - z);
 }
 
 module.exports = new AdvancedReportsController();

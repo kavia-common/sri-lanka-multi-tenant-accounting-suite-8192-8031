@@ -9,6 +9,17 @@
 
 const ExcelJS = require('exceljs');
 
+// Convert 1-based column index to Excel column letter (supports up to at least ZZZ)
+function colName(n) {
+  let s = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - m) / 26);
+  }
+  return s;
+}
+
 // Number formats used for finance
 const formats = {
   money: '#,##0.00;[Red]-#,##0.00',
@@ -83,8 +94,11 @@ async function buildTrialBalanceWorkbook({ company, params, data }) {
   sheet.getCell('F5').numFmt = formats.money;
 
   // Table header (row 6)
-  const headers = ['Account Code', 'Account Name', 'Type', 'Balance', 'Total Debits', 'Total Credits'];
-  const widths = [18, 36, 14, 16, 16, 16];
+  const hasBvA = Array.isArray(data?.trialBalance) && data.trialBalance.some(l => l.budget !== undefined || l.variance !== undefined);
+  const headers = hasBvA
+    ? ['Account Code', 'Account Name', 'Type', 'Balance', 'Budget', 'Actual', 'Variance', 'Variance %', 'Total Debits', 'Total Credits']
+    : ['Account Code', 'Account Name', 'Type', 'Balance', 'Total Debits', 'Total Credits'];
+  const widths = hasBvA ? [18, 36, 14, 16, 16, 16, 16, 14, 16, 16] : [18, 36, 14, 16, 16, 16];
   headers.forEach((h, i) => {
     const cell = sheet.getRow(6).getCell(i + 1);
     cell.value = h;
@@ -96,21 +110,26 @@ async function buildTrialBalanceWorkbook({ company, params, data }) {
   const startRow = 7;
   (data?.trialBalance || []).forEach((line, idx) => {
     const r = sheet.getRow(startRow + idx);
-    r.getCell(1).value = line.code;
-    r.getCell(2).value = line.name;
-    r.getCell(3).value = line.type;
-    r.getCell(4).value = Number(line.balance || 0);
-    r.getCell(4).numFmt = formats.money;
-    r.getCell(5).value = Number(line.total_debits || 0);
-    r.getCell(5).numFmt = formats.money;
-    r.getCell(6).value = Number(line.total_credits || 0);
-    r.getCell(6).numFmt = formats.money;
+    let col = 1;
+    r.getCell(col++).value = line.code;
+    r.getCell(col++).value = line.name;
+    r.getCell(col++).value = line.type;
+    r.getCell(col).value = Number(line.balance || 0); r.getCell(col).numFmt = formats.money; col++;
+    if (hasBvA) {
+      r.getCell(col).value = Number(line.budget || 0); r.getCell(col).numFmt = formats.money; col++;
+      r.getCell(col).value = Number(line.actual || line.balance || 0); r.getCell(col).numFmt = formats.money; col++;
+      r.getCell(col).value = Number(line.variance || 0); r.getCell(col).numFmt = formats.money; col++;
+      r.getCell(col).value = typeof line.variancePercent === 'string'
+        ? Number(line.variancePercent) / 100
+        : (Number(line.variancePercent || 0) / 100);
+      r.getCell(col).numFmt = formats.percent; col++;
+    }
+    r.getCell(col).value = Number(line.total_debits || 0); r.getCell(col).numFmt = formats.money; col++;
+    r.getCell(col).value = Number(line.total_credits || 0); r.getCell(col).numFmt = formats.money; col++;
 
-    for (let c = 1; c <= 6; c++) {
+    for (let c = 1; c <= (hasBvA ? 10 : 6); c++) {
       applyBodyBorder(r.getCell(c));
-      if (c >= 4) {
-        r.getCell(c).alignment = { horizontal: 'right' };
-      }
+      if (c >= 4) r.getCell(c).alignment = { horizontal: 'right' };
     }
   });
 
@@ -119,13 +138,22 @@ async function buildTrialBalanceWorkbook({ company, params, data }) {
   const totalRow = sheet.getRow(lastRow + 1);
   totalRow.getCell(3).value = 'Totals';
   totalRow.getCell(3).font = { bold: true };
+  const lastCol = hasBvA ? 10 : 6;
+  // Balance
   totalRow.getCell(4).value = { formula: `SUM(D${startRow}:D${lastRow})` };
   totalRow.getCell(4).numFmt = formats.money;
-  totalRow.getCell(5).value = { formula: `SUM(E${startRow}:E${lastRow})` };
-  totalRow.getCell(5).numFmt = formats.money;
-  totalRow.getCell(6).value = { formula: `SUM(F${startRow}:F${lastRow})` };
-  totalRow.getCell(6).numFmt = formats.money;
-  for (let c = 1; c <= 6; c++) applyBodyBorder(totalRow.getCell(c));
+  let sumStartIdx = 5;
+  if (hasBvA) {
+    // Budget, Actual, Variance
+    totalRow.getCell(5).value = { formula: `SUM(E${startRow}:E${lastRow})` }; totalRow.getCell(5).numFmt = formats.money;
+    totalRow.getCell(6).value = { formula: `SUM(F${startRow}:F${lastRow})` }; totalRow.getCell(6).numFmt = formats.money;
+    totalRow.getCell(7).value = { formula: `SUM(G${startRow}:G${lastRow})` }; totalRow.getCell(7).numFmt = formats.money;
+    // Variance % left blank in totals
+    sumStartIdx = 9;
+  }
+  totalRow.getCell(sumStartIdx).value = { formula: `SUM(${colName(sumStartIdx)}${startRow}:${colName(sumStartIdx)}${lastRow})` }; totalRow.getCell(sumStartIdx).numFmt = formats.money;
+  totalRow.getCell(sumStartIdx + 1).value = { formula: `SUM(${colName(sumStartIdx + 1)}${startRow}:${colName(sumStartIdx + 1)}${lastRow})` }; totalRow.getCell(sumStartIdx + 1).numFmt = formats.money;
+  for (let c = 1; c <= lastCol; c++) applyBodyBorder(totalRow.getCell(c));
 
   return wb.xlsx.writeBuffer();
 }

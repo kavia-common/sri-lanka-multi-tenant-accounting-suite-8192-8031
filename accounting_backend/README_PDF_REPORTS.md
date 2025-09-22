@@ -1,37 +1,49 @@
-# PDF Output for Sri Lanka Statutory and Financial Reports
+# PDF Reporting Notes
 
-This backend supports PDF generation for Sri Lanka statutory reports and annual financials using PDFKit with company branding/letterhead.
+This backend provides branded PDF generation utilities via PdfService (PDFKit) and supports streaming PDFs for certain reports. Advanced v2 report endpoints add comparative periods and budget vs actual analysis and currently support JSON and Excel (xlsx) outputs; PDF can be easily added by composing the response using PdfService.
 
-How to request PDF:
-- Add `?format=pdf` to any supported report endpoint (default is JSON):
-  - GET /api/reports/lk/vat-return?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD&include_transactions=true&format=pdf
-  - GET /api/reports/lk/income-tax?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD&format=pdf
-  - GET /api/reports/lk/wht-statement?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD&include_transactions=true&format=pdf
-  - GET /api/reports/lk/epf-etf?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD&format=pdf
-  - GET /api/reports/lk/annual-financials?as_of_date=YYYY-MM-DD&include_previous_year=true&format=pdf
+Key files:
+- src/services/PdfService.js: Helpers to create documents, draw headers/sections/tables/totals.
+- src/controllers/*: Controllers that prepare data and invoke services.
+- README_XLSX_REPORTS.md: Similar notes for Excel exports.
+- README_ADVANCED_REPORTS.md: Details on v2 endpoints and parameters (period[], compare_to[], fiscal_year, budget_source, format).
 
-Branding / Header:
-- Pulls company info from DB: name, address, email, phone, tax_number.
-- Displays report title, period info, and generated timestamp.
-- Layout helper in src/services/PdfService.js
+Supported formats today:
+- JSON: All v1 and v2 endpoints.
+- XLSX: Trial Balance, Balance Sheet, Profit & Loss, General Ledger, Cash Flow, Aged AR/AP (v1 and v2).
+- PDF: Compliance endpoints (e.g., VAT return) already support pdf via ?format=pdf. v2 financial statements can be rendered to PDF by composing sections with PdfService.
 
-Per-report PDF content:
-- VAT Return
-  - Summary: Output VAT, Input VAT, Net VAT, Zero-rated Sales (est.), Exempt Sales (est.), Non-recoverable VAT (est.)
-  - Optional details table of VAT-related transactions when `include_transactions=true`
-- Income Tax Schedule
-  - Computation: Revenue, Expenses, Profit Before Tax, Addbacks, Allowances, Taxable Income, Corporate Tax Rate, Tax Due
-- WHT Statement
-  - Summary by type (Interest, Dividend, Services, Other) with totals
-  - Optional detailed transactions table when `include_transactions=true`
-- EPF/ETF
-  - Ledger amounts: Gross Pay, EPF Withheld (ledger), ETF Employer (ledger)
-  - Estimated contributions: EPF Employee 8%, EPF Employer 12%, ETF Employer 3%
-- Annual Financials
-  - Current year Companies Act-style category summary
-  - Optional previous year comparative if `include_previous_year=true`
+Advanced v2 parameters:
+- period[]: array of strings. For P&L/GL/Cash Flow use "YYYY-MM-DD..YYYY-MM-DD". For Balance Sheet and Aged reports use a single as-of date "YYYY-MM-DD".
+- compare_to[]: array of strings (same format as period[]), used for comparative analysis.
+- budget_source: table:budgets | zero | prior_year
+  - table:budgets: sums budgets.amount by account for the given period range.
+  - zero: treats all budgets as 0.
+  - prior_year: uses prior-year actuals for the same period as the budget baseline.
+- fiscal_year: if period[] is omitted, service maps to:
+  - P&L/GL/Cash Flow: YYYY-01-01..YYYY-12-31
+  - Balance Sheet: YYYY-12-31 as_of_date
+- format: json | xlsx (add pdf in future as needed)
 
-Implementation notes:
-- PDF builder: `src/services/PdfService.js`
-- Controllers render PDF when `format=pdf`, otherwise return JSON as before.
-- Corporate tax rate for income tax schedule uses env `SL_CORP_TAX_RATE` (default 0.30).
+Examples:
+- Profit & Loss BvA with comparison:
+  GET /api/reports/v2/profit-loss?period[]=2025-01-01..2025-03-31&compare_to[]=2024-01-01..2024-03-31&budget_source=table:budgets
+
+- Balance Sheet comparative as-of:
+  GET /api/reports/v2/balance-sheet?period[]=2025-03-31&compare_to[]=2024-03-31
+
+- Trial Balance with fiscal year fallback and prior-year budget:
+  GET /api/reports/v2/trial-balance?fiscal_year=2025&budget_source=prior_year
+
+How to add PDF output for v2 endpoints:
+1) In the relevant controller (src/controllers/advancedReports.js), after assembling data:
+   - const doc = PdfService.createDocument(res, { fileName: 'report.pdf' });
+   - PdfService.drawHeader(doc, req.company, { reportTitle: 'Title', periodText: '...', comparativeText: '...' });
+   - Use PdfService.section, PdfService.table, PdfService.keyValues, PdfService.totalsRow to render content.
+   - doc.end();
+2) Add a query parameter ?format=pdf to trigger the PDF branch.
+3) Ensure consistent columns with the JSON/XLSX shapes (actual, budget, variance, variancePercent) to keep layouts predictable.
+
+Performance notes:
+- Queries are parameterized and aligned with indexes on transactions(company_id, date), journal_entries(transaction_id, account_id), and budgets(company_id, account_id, period).
+- v2 services batch database calls via Promise.all to reduce latency.

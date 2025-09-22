@@ -41,6 +41,111 @@ function buildPeriodFilter({ start_date, end_date, as_of_date }, baseParams = []
   return { filters, params };
 }
 
+/**
+ * ========== Advanced helpers (module scope) ==========
+ */
+const toNum = (v) => {
+  const num = Number(v || 0);
+  return Number.isFinite(num) ? num : 0;
+};
+
+// Build parameterized WHERE for speed and index usage (t.company_id, t.date)
+function whereForRange(companyId, range, startIndex = 1) {
+  const clauses = [`t.company_id = $${startIndex}`];
+  const params = [companyId];
+  let idx = startIndex + 1;
+  if (range.as_of_date) {
+    clauses.push(`t.date <= $${idx++}`);
+    params.push(range.as_of_date);
+  } else {
+    if (range.start_date) {
+      clauses.push(`t.date >= $${idx++}`);
+      params.push(range.start_date);
+    }
+    if (range.end_date) {
+      clauses.push(`t.date <= $${idx++}`);
+      params.push(range.end_date);
+    }
+  }
+  return { where: clauses.join(' AND '), params, nextIndex: idx };
+}
+
+async function queryActualsByAccount(companyId, range, { accountTypes }) {
+  const { where, params } = whereForRange(companyId, range);
+  const sql = `
+    SELECT a.id, a.code, a.name, a.type,
+           COALESCE(SUM(
+             CASE
+               WHEN a.type = 'REVENUE' THEN je.credit_amount - je.debit_amount
+               WHEN a.type = 'EXPENSE' THEN je.debit_amount - je.credit_amount
+               WHEN a.type IN ('ASSET','EQUITY','LIABILITY')
+                 THEN (CASE WHEN a.type IN ('ASSET','EXPENSE') THEN je.debit_amount - je.credit_amount
+                       ELSE je.credit_amount - je.debit_amount END)
+               ELSE 0
+             END
+           ),0)::numeric(18,2) AS amount
+      FROM journal_entries je
+      JOIN transactions t ON t.id = je.transaction_id
+      JOIN accounts a ON a.id = je.account_id
+     WHERE ${where}
+       ${accountTypes && accountTypes.length ? `AND a.type IN (${accountTypes.map((_, i) => '$' + (params.length + i + 1)).join(',')})` : ''}
+     GROUP BY a.id, a.code, a.name, a.type
+  `;
+  const typesParams = accountTypes && accountTypes.length ? [...params, ...accountTypes] : params;
+  const { rows } = await db.query(sql, typesParams);
+  return rows;
+}
+
+async function queryBudgetByAccount(companyId, range, budget_source) {
+  // Supports 'table:budgets' and fallback 'zero' or 'prior_year'
+  if (budget_source === 'zero') return [];
+  if (budget_source === 'prior_year') {
+    // Move range back one year
+    const adj = (d) => d ? new Date(new Date(d).setFullYear(new Date(d).getFullYear() - 1)).toISOString().slice(0, 10) : null;
+    const prior = { start_date: adj(range.start_date), end_date: adj(range.end_date), as_of_date: adj(range.as_of_date) };
+    // Return 'actuals' for prior period as budget
+    const rows = await queryActualsByAccount(companyId, prior, { accountTypes: ['REVENUE', 'EXPENSE'] });
+    return rows.map(r => ({ id: r.id, code: r.code, name: r.name, type: r.type, budget: r.amount }));
+  }
+  // Default: try budgets table
+  try {
+    // Use start/end; if not provided but as_of_date provided, we treat that as end with start at fiscal year start baseline
+    let sd = range.start_date, ed = range.end_date;
+    if (!sd && range.as_of_date) {
+      sd = `${new Date(range.as_of_date).getFullYear()}-01-01`;
+      ed = range.as_of_date;
+    }
+    const sql = `
+      SELECT b.account_id AS id, a.code, a.name, a.type,
+             COALESCE(SUM(b.amount),0)::numeric(18,2) AS budget
+        FROM budgets b
+        JOIN accounts a ON a.id = b.account_id
+       WHERE b.company_id = $1 AND (b.period BETWEEN $2 AND $3)
+       GROUP BY b.account_id, a.code, a.name, a.type
+    `;
+    const { rows } = await db.query(sql, [companyId, sd, ed]);
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+function mergeActualBudget(actuals, budgets) {
+  const bmap = (budgets || []).reduce((acc, b) => { acc[b.id] = toNum(b.budget); return acc; }, {});
+  return (actuals || []).map(a => {
+    const actual = toNum(a.amount ?? a.actual);
+    const budget = bmap[a.id] || 0;
+    const variance = actual - budget;
+    return {
+      id: a.id, code: a.code, name: a.name, type: a.type,
+      actual: actual.toFixed(2),
+      budget: budget.toFixed(2),
+      variance: variance.toFixed(2),
+      variancePercent: budget !== 0 ? ((variance / budget) * 100).toFixed(2) : '0.00',
+    };
+  });
+}
+
 // PUBLIC_INTERFACE
 class ReportingService {
   /** PUBLIC_INTERFACE
@@ -674,6 +779,211 @@ class ReportingService {
         ],
       },
     };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getProfitLossAdvanced(companyId, {periods, comparePeriods, budget_source})
+   */
+  static async getProfitLossAdvanced(companyId, { periods = [], comparePeriods = [], budget_source = 'table:budgets' } = {}) {
+    const base = periods[0] || {};
+    if (!(base.start_date && base.end_date)) {
+      const err = new Error('Primary period range (start..end) required');
+      err.status = 400;
+      throw err;
+    }
+    const [actuals, budgets] = await Promise.all([
+      queryActualsByAccount(companyId, base, { accountTypes: ['REVENUE', 'EXPENSE'] }),
+      queryBudgetByAccount(companyId, base, budget_source),
+    ]);
+    const lines = mergeActualBudget(actuals, budgets);
+
+    const tot = lines.reduce((acc, l) => {
+      const a = toNum(l.actual), b = toNum(l.budget);
+      if (l.type === 'REVENUE') { acc.actRev += a; acc.budRev += b; }
+      else if (l.type === 'EXPENSE') { acc.actExp += a; acc.budExp += b; }
+      return acc;
+    }, { actRev: 0, actExp: 0, budRev: 0, budExp: 0 });
+    const summary = {
+      totalActualRevenue: tot.actRev.toFixed(2),
+      totalActualExpenses: tot.actExp.toFixed(2),
+      netActualIncome: (tot.actRev - tot.actExp).toFixed(2),
+      totalBudgetRevenue: tot.budRev.toFixed(2),
+      totalBudgetExpenses: tot.budExp.toFixed(2),
+      netBudgetIncome: (tot.budRev - tot.budExp).toFixed(2),
+      variance: ((tot.actRev - tot.actExp) - (tot.budRev - tot.budExp)).toFixed(2),
+    };
+
+    const comparative = [];
+    for (const cmp of comparePeriods) {
+      if (!(cmp.start_date && cmp.end_date)) continue;
+      const [a2, b2] = await Promise.all([
+        queryActualsByAccount(companyId, cmp, { accountTypes: ['REVENUE', 'EXPENSE'] }),
+        queryBudgetByAccount(companyId, cmp, budget_source),
+      ]);
+      comparative.push({
+        period: cmp,
+        lines: mergeActualBudget(a2, b2),
+      });
+    }
+
+    return {
+      meta: { base },
+      payload: { profitLoss: { lines }, summary },
+      comparative,
+    };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getBalanceSheetAdvanced(companyId, {periods, comparePeriods, budget_source})
+   * For BS, periods array should contain objects with as_of_date.
+   */
+  static async getBalanceSheetAdvanced(companyId, { periods = [], comparePeriods = [], budget_source = 'table:budgets' } = {}) {
+    const base = periods[0] || {};
+    const asOf = base.as_of_date;
+    const rows = await queryActualsByAccount(companyId, { as_of_date: asOf }, { accountTypes: ['ASSET', 'LIABILITY', 'EQUITY'] });
+    const budgets = budget_source === 'zero' ? [] : await queryBudgetByAccount(companyId, { as_of_date: asOf }, budget_source);
+    const merged = mergeActualBudget(rows, budgets);
+
+    const assets = []; const liabilities = []; const equity = [];
+    let ta = 0, tl = 0, te = 0;
+    for (const r of merged) {
+      const actual = toNum(r.actual);
+      if (r.type === 'ASSET') { assets.push({ code: r.code, name: r.name, amount: r.actual }); ta += actual; }
+      if (r.type === 'LIABILITY') { liabilities.push({ code: r.code, name: r.name, amount: r.actual }); tl += actual; }
+      if (r.type === 'EQUITY') { equity.push({ code: r.code, name: r.name, amount: r.actual }); te += actual; }
+    }
+    const payload = {
+      balanceSheet: { assets, liabilities, equity },
+      summary: {
+        totalAssets: ta.toFixed(2),
+        totalLiabilities: tl.toFixed(2),
+        totalEquity: te.toFixed(2),
+        isBalanced: ta.toFixed(2) === (tl + te).toFixed(2),
+      },
+    };
+
+    const comparative = [];
+    for (const cmp of comparePeriods) {
+      if (!cmp.as_of_date) continue;
+      const crow = await queryActualsByAccount(companyId, { as_of_date: cmp.as_of_date }, { accountTypes: ['ASSET', 'LIABILITY', 'EQUITY'] });
+      comparative.push({ period: cmp, lines: crow });
+    }
+
+    return { meta: { base }, payload, comparative };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getTrialBalanceAdvanced(companyId, {periods, comparePeriods, budget_source})
+   */
+  static async getTrialBalanceAdvanced(companyId, { periods = [], comparePeriods = [], budget_source = 'table:budgets' } = {}) {
+    const base = periods[0] || {};
+    const range = base.as_of_date ? { as_of_date: base.as_of_date } : { start_date: base.start_date, end_date: base.end_date };
+    const actuals = await queryActualsByAccount(companyId, range, { accountTypes: [] }); // all types
+    const budgets = await queryBudgetByAccount(companyId, range, budget_source);
+    const lines = mergeActualBudget(actuals, budgets);
+
+    let totalDebits = 0, totalCredits = 0;
+    actuals.forEach(r => {
+      const type = r.type;
+      const amt = toNum(r.amount);
+      // Derive debits/credits orientation
+      if (type === 'REVENUE' || type === 'LIABILITY' || type === 'EQUITY') {
+        if (amt < 0) totalDebits += Math.abs(amt); else totalCredits += amt;
+      } else {
+        if (amt >= 0) totalDebits += amt; else totalCredits += Math.abs(amt);
+      }
+    });
+
+    const payload = {
+      trialBalance: lines.map(l => ({
+        code: l.code,
+        name: l.name,
+        type: l.type,
+        balance: (toNum(l.actual)).toFixed(2),
+        total_debits: totalDebits.toFixed(2), // overall totals; per-account totals require further sums
+        total_credits: totalCredits.toFixed(2),
+        budget: l.budget, actual: l.actual, variance: l.variance, variancePercent: l.variancePercent,
+      })),
+    };
+
+    const comparative = [];
+    for (const cmp of comparePeriods) {
+      const crange = cmp.as_of_date ? { as_of_date: cmp.as_of_date } : { start_date: cmp.start_date, end_date: cmp.end_date };
+      const a2 = await queryActualsByAccount(companyId, crange, { accountTypes: [] });
+      comparative.push({ period: cmp, lines: a2 });
+    }
+
+    const summary = { totalDebits: totalDebits.toFixed(2), totalCredits: totalCredits.toFixed(2), isBalanced: totalDebits.toFixed(2) === totalCredits.toFixed(2) };
+    return { meta: { base }, payload: { ...payload, summary }, comparative };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getGeneralLedgerAdvanced(companyId, {periods, comparePeriods, paging, account_id, account_code})
+   */
+  static async getGeneralLedgerAdvanced(companyId, { periods = [], paging = {}, account_id, account_code } = {}) {
+    const base = periods[0] || {};
+    const start_date = base.start_date, end_date = base.end_date;
+    const payload = await ReportingService.getGeneralLedger(companyId, { start_date, end_date, account_id, account_code, page: paging.page || 1, limit: paging.limit || 100 });
+    return { meta: { base: { start_date, end_date } }, payload };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getCashFlowAdvanced(companyId, {periods})
+   */
+  static async getCashFlowAdvanced(companyId, { periods = [] } = {}) {
+    const base = periods[0] || {};
+    const start_date = base.start_date, end_date = base.end_date;
+    const payload = await ReportingService.getCashFlow(companyId, { start_date, end_date });
+    return { meta: { base: { start_date, end_date } }, payload };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getAgedReceivablesAdvanced(companyId, { periods, buckets })
+   */
+  static async getAgedReceivablesAdvanced(companyId, { periods = [], buckets = [30,60,90,120] } = {}) {
+    const base = periods[0] || {};
+    const as_of_date = base.as_of_date || new Date().toISOString().slice(0,10);
+    const payload = await ReportingService.getAgedReceivables(companyId, { as_of_date, buckets });
+    const bucketLabels = ['current', `${buckets[0]}d`, `${buckets[1]}d`, `${buckets[2]}d`, 'over'];
+    return { meta: { base: { as_of_date }, bucketLabels }, payload };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getAgedPayablesAdvanced(companyId, { periods, buckets })
+   */
+  static async getAgedPayablesAdvanced(companyId, { periods = [], buckets = [30,60,90,120] } = {}) {
+    const base = periods[0] || {};
+    const as_of_date = base.as_of_date || new Date().toISOString().slice(0,10);
+    const payload = await ReportingService.getAgedPayables(companyId, { as_of_date, buckets });
+    const bucketLabels = ['current', `${buckets[0]}d`, `${buckets[1]}d`, `${buckets[2]}d`, 'over'];
+    return { meta: { base: { as_of_date }, bucketLabels }, payload };
+  }
+
+  /** PUBLIC_INTERFACE
+   * getBudgetVsActualAdvanced(companyId, { periods, budget_source })
+   */
+  static async getBudgetVsActualAdvanced(companyId, { periods = [], budget_source = 'table:budgets' } = {}) {
+    const base = periods[0] || {};
+    if (!(base.start_date && base.end_date)) {
+      const err = new Error('Primary period range (start..end) required');
+      err.status = 400;
+      throw err;
+    }
+    const [actuals, budgets] = await Promise.all([
+      queryActualsByAccount(companyId, base, { accountTypes: ['REVENUE', 'EXPENSE'] }),
+      queryBudgetByAccount(companyId, base, budget_source),
+    ]);
+    const lines = mergeActualBudget(actuals, budgets);
+    const summary = lines.reduce((acc, l) => {
+      const a = toNum(l.actual), b = toNum(l.budget);
+      if (l.type === 'REVENUE') { acc.totalActualRevenue += a; acc.totalBudgetRevenue += b; }
+      else if (l.type === 'EXPENSE') { acc.totalActualExpenses += a; acc.totalBudgetExpenses += b; }
+      return acc;
+    }, { totalActualRevenue: 0, totalActualExpenses: 0, totalBudgetRevenue: 0, totalBudgetExpenses: 0 });
+    summary.netActualIncome = (summary.totalActualRevenue - summary.totalActualExpenses).toFixed(2);
+    summary.netBudgetIncome = (summary.totalBudgetRevenue - summary.totalBudgetExpenses).toFixed(2);
+
+    return { meta: { base }, payload: { lines, summary: Object.fromEntries(Object.entries(summary).map(([k,v]) => [k, typeof v === 'number' ? v.toFixed(2) : v])) } };
   }
 }
 

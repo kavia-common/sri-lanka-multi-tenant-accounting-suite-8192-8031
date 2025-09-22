@@ -1,5 +1,7 @@
+'use strict';
+
 const express = require('express');
-const controller = require('../controllers/advancedReports');
+const advancedReportsController = require('../controllers/advancedReports');
 const { authenticateToken } = require('../middleware/auth');
 const { validateCompanyAccess } = require('../middleware/companyContext');
 
@@ -17,7 +19,7 @@ const router = express.Router();
  * /api/reports/v2/trial-balance:
  *   get:
  *     summary: Trial Balance (advanced)
- *     description: Generate trial balance with optional drill-down and inclusion of zero balances.
+ *     description: Generate trial balance with comparative periods and budget vs actual columns.
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -25,30 +27,52 @@ const router = express.Router();
  *       - in: header
  *         name: x-company-id
  *         required: true
- *         schema: { type: string, format: uuid }
+ *         schema:
+ *           type: string
+ *           format: uuid
  *       - in: query
- *         name: start_date
- *         schema: { type: string, format: date }
+ *         name: period[]
+ *         schema:
+ *           type: array
+ *           items:
+ *             type: string
+ *           example: ["2025-01-01..2025-03-31"]
+ *         description: Primary periods. Use start..end format or single as_of date for BS-like reports.
  *       - in: query
- *         name: end_date
- *         schema: { type: string, format: date }
+ *         name: compare_to[]
+ *         schema:
+ *           type: array
+ *           items:
+ *             type: string
+ *           example: ["2024-01-01..2024-03-31"]
  *       - in: query
- *         name: include_zero
- *         schema: { type: boolean }
+ *         name: budget_source
+ *         schema:
+ *           type: string
+ *           example: table:budgets
+ *         description: table:budgets|zero|prior_year
  *       - in: query
- *         name: drilldown
- *         schema: { type: boolean }
+ *         name: fiscal_year
+ *         schema:
+ *           type: string
+ *           example: "2025"
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [json, xlsx]
  *     responses:
- *       200: { description: Trial balance generated }
+ *       200:
+ *         description: Trial balance generated
  */
-router.get('/v2/trial-balance', authenticateToken, validateCompanyAccess, controller.trialBalance);
+router.get('/v2/trial-balance', authenticateToken, validateCompanyAccess, advancedReportsController.trialBalance);
 
 /**
  * @swagger
  * /api/reports/v2/balance-sheet:
  *   get:
  *     summary: Balance Sheet (advanced)
- *     description: Generate balance sheet with optional comparative period.
+ *     description: Generate balance sheet with comparative as-of periods and budget vs actual columns.
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -56,27 +80,42 @@ router.get('/v2/trial-balance', authenticateToken, validateCompanyAccess, contro
  *       - in: header
  *         name: x-company-id
  *         required: true
- *         schema: { type: string, format: uuid }
+ *         schema:
+ *           type: string
+ *           format: uuid
  *       - in: query
- *         name: as_of_date
- *         schema: { type: string, format: date }
+ *         name: period[]
+ *         schema:
+ *           type: array
+ *           items: { type: string }
+ *           example: ["2025-03-31"]
  *       - in: query
- *         name: comparative
- *         schema: { type: boolean }
+ *         name: compare_to[]
+ *         schema:
+ *           type: array
+ *           items: { type: string }
+ *           example: ["2024-03-31"]
  *       - in: query
- *         name: compare_as_of_date
- *         schema: { type: string, format: date }
+ *         name: budget_source
+ *         schema: { type: string }
+ *       - in: query
+ *         name: fiscal_year
+ *         schema: { type: string }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, xlsx] }
  *     responses:
- *       200: { description: Balance sheet generated }
+ *       200:
+ *         description: Balance sheet generated
  */
-router.get('/v2/balance-sheet', authenticateToken, validateCompanyAccess, controller.balanceSheet);
+router.get('/v2/balance-sheet', authenticateToken, validateCompanyAccess, advancedReportsController.balanceSheet);
 
 /**
  * @swagger
  * /api/reports/v2/profit-loss:
  *   get:
  *     summary: Profit & Loss (advanced)
- *     description: Generate P&L with optional comparative and drill-down.
+ *     description: Generate P&L with comparative periods, budget vs actual columns, and async batched queries.
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -86,36 +125,34 @@ router.get('/v2/balance-sheet', authenticateToken, validateCompanyAccess, contro
  *         required: true
  *         schema: { type: string, format: uuid }
  *       - in: query
- *         name: start_date
- *         required: true
- *         schema: { type: string, format: date }
+ *         name: period[]
+ *         schema: { type: array, items: { type: string } }
+ *         example: ["2025-01-01..2025-03-31"]
  *       - in: query
- *         name: end_date
- *         required: true
- *         schema: { type: string, format: date }
+ *         name: compare_to[]
+ *         schema: { type: array, items: { type: string } }
+ *         example: ["2024-01-01..2024-03-31"]
  *       - in: query
- *         name: comparative
- *         schema: { type: boolean }
+ *         name: budget_source
+ *         schema: { type: string }
  *       - in: query
- *         name: compare_start_date
- *         schema: { type: string, format: date }
+ *         name: fiscal_year
+ *         schema: { type: string }
  *       - in: query
- *         name: compare_end_date
- *         schema: { type: string, format: date }
- *       - in: query
- *         name: drilldown
- *         schema: { type: boolean }
+ *         name: format
+ *         schema: { type: string, enum: [json, xlsx] }
  *     responses:
- *       200: { description: Profit & Loss generated }
+ *       200:
+ *         description: Profit & Loss generated
  */
-router.get('/v2/profit-loss', authenticateToken, validateCompanyAccess, controller.profitLoss);
+router.get('/v2/profit-loss', authenticateToken, validateCompanyAccess, advancedReportsController.profitLoss);
 
 /**
  * @swagger
  * /api/reports/v2/general-ledger:
  *   get:
- *     summary: General Ledger
- *     description: Paginated ledger with filters by account and date range.
+ *     summary: General Ledger (advanced)
+ *     description: Ledger with comparative filters and pagination.
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -124,6 +161,12 @@ router.get('/v2/profit-loss', authenticateToken, validateCompanyAccess, controll
  *         name: x-company-id
  *         required: true
  *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: period[]
+ *         schema: { type: array, items: { type: string } }
+ *       - in: query
+ *         name: compare_to[]
+ *         schema: { type: array, items: { type: string } }
  *       - in: query
  *         name: account_id
  *         schema: { type: string, format: uuid }
@@ -131,28 +174,26 @@ router.get('/v2/profit-loss', authenticateToken, validateCompanyAccess, controll
  *         name: account_code
  *         schema: { type: string }
  *       - in: query
- *         name: start_date
- *         schema: { type: string, format: date }
- *       - in: query
- *         name: end_date
- *         schema: { type: string, format: date }
- *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
  *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 100 }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, xlsx] }
  *     responses:
- *       200: { description: Ledger generated }
+ *       200:
+ *         description: Ledger generated
  */
-router.get('/v2/general-ledger', authenticateToken, validateCompanyAccess, controller.generalLedger);
+router.get('/v2/general-ledger', authenticateToken, validateCompanyAccess, advancedReportsController.generalLedger);
 
 /**
  * @swagger
  * /api/reports/v2/cash-flow:
  *   get:
- *     summary: Cash Flow Statement
- *     description: Indirect method cash flow statement.
+ *     summary: Cash Flow Statement (advanced)
+ *     description: Indirect method with comparative periods.
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -162,51 +203,26 @@ router.get('/v2/general-ledger', authenticateToken, validateCompanyAccess, contr
  *         required: true
  *         schema: { type: string, format: uuid }
  *       - in: query
- *         name: start_date
- *         required: true
- *         schema: { type: string, format: date }
+ *         name: period[]
+ *         schema: { type: array, items: { type: string } }
  *       - in: query
- *         name: end_date
- *         required: true
- *         schema: { type: string, format: date }
+ *         name: compare_to[]
+ *         schema: { type: array, items: { type: string } }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, xlsx] }
  *     responses:
- *       200: { description: Cash flow generated }
+ *       200:
+ *         description: Cash flow generated
  */
-router.get('/v2/cash-flow', authenticateToken, validateCompanyAccess, controller.cashFlow);
-
-/**
- * @swagger
- * /api/reports/v2/changes-in-equity:
- *   get:
- *     summary: Statement of Changes in Equity
- *     description: Equity movements over a period.
- *     tags: [Reports]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: x-company-id
- *         required: true
- *         schema: { type: string, format: uuid }
- *       - in: query
- *         name: start_date
- *         required: true
- *         schema: { type: string, format: date }
- *       - in: query
- *         name: end_date
- *         required: true
- *         schema: { type: string, format: date }
- *     responses:
- *       200: { description: Changes in equity generated }
- */
-router.get('/v2/changes-in-equity', authenticateToken, validateCompanyAccess, controller.changesInEquity);
+router.get('/v2/cash-flow', authenticateToken, validateCompanyAccess, advancedReportsController.cashFlow);
 
 /**
  * @swagger
  * /api/reports/v2/aged-receivables:
  *   get:
- *     summary: Aged Receivables
- *     description: Buckets receivables into 0-30, 31-60, 61-90, 90+ by default.
+ *     summary: Aged Receivables (advanced)
+ *     description: Buckets can be customized; supports as-of (period[] single date) and xlsx export.
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -216,22 +232,27 @@ router.get('/v2/changes-in-equity', authenticateToken, validateCompanyAccess, co
  *         required: true
  *         schema: { type: string, format: uuid }
  *       - in: query
- *         name: as_of_date
- *         schema: { type: string, format: date }
+ *         name: period[]
+ *         schema: { type: array, items: { type: string } }
  *       - in: query
  *         name: buckets
- *         schema: { type: string, description: "Comma-separated e.g., 30,60,90,120" }
+ *         schema: { type: string }
+ *         description: Comma-separated e.g., 30,60,90,120
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, xlsx] }
  *     responses:
- *       200: { description: Aged receivables generated }
+ *       200:
+ *         description: Aged receivables generated
  */
-router.get('/v2/aged-receivables', authenticateToken, validateCompanyAccess, controller.agedReceivables);
+router.get('/v2/aged-receivables', authenticateToken, validateCompanyAccess, advancedReportsController.agedReceivables);
 
 /**
  * @swagger
  * /api/reports/v2/aged-payables:
  *   get:
- *     summary: Aged Payables
- *     description: Buckets payables into 0-30, 31-60, 61-90, 90+ by default.
+ *     summary: Aged Payables (advanced)
+ *     description: Buckets can be customized; supports as-of (period[] single date) and xlsx export.
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -241,22 +262,27 @@ router.get('/v2/aged-receivables', authenticateToken, validateCompanyAccess, con
  *         required: true
  *         schema: { type: string, format: uuid }
  *       - in: query
- *         name: as_of_date
- *         schema: { type: string, format: date }
+ *         name: period[]
+ *         schema: { type: array, items: { type: string } }
  *       - in: query
  *         name: buckets
- *         schema: { type: string, description: "Comma-separated e.g., 30,60,90,120" }
+ *         schema: { type: string }
+ *         description: Comma-separated e.g., 30,60,90,120
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, xlsx] }
  *     responses:
- *       200: { description: Aged payables generated }
+ *       200:
+ *         description: Aged payables generated
  */
-router.get('/v2/aged-payables', authenticateToken, validateCompanyAccess, controller.agedPayables);
+router.get('/v2/aged-payables', authenticateToken, validateCompanyAccess, advancedReportsController.agedPayables);
 
 /**
  * @swagger
  * /api/reports/v2/budget-vs-actual:
  *   get:
- *     summary: Budget vs Actuals
- *     description: Baseline budget vs actuals for P&L accounts (works without budgets table).
+ *     summary: Budget vs Actuals (advanced)
+ *     description: P&L accounts with budget and variance columns for the selected period(s).
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
@@ -266,16 +292,22 @@ router.get('/v2/aged-payables', authenticateToken, validateCompanyAccess, contro
  *         required: true
  *         schema: { type: string, format: uuid }
  *       - in: query
- *         name: start_date
- *         required: true
- *         schema: { type: string, format: date }
+ *         name: period[]
+ *         schema: { type: array, items: { type: string } }
  *       - in: query
- *         name: end_date
- *         required: true
- *         schema: { type: string, format: date }
+ *         name: budget_source
+ *         schema: { type: string }
+ *         example: table:budgets
+ *       - in: query
+ *         name: fiscal_year
+ *         schema: { type: string }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, xlsx] }
  *     responses:
- *       200: { description: Budget vs actuals generated }
+ *       200:
+ *         description: Budget vs Actuals generated
  */
-router.get('/v2/budget-vs-actual', authenticateToken, validateCompanyAccess, controller.budgetVsActual);
+router.get('/v2/budget-vs-actual', authenticateToken, validateCompanyAccess, advancedReportsController.budgetVsActual);
 
 module.exports = router;
