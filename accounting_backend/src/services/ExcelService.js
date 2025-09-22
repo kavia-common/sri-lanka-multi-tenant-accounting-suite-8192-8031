@@ -512,6 +512,51 @@ async function buildSimpleKeyAmountWorkbook({ title, company, headers, rows, num
   return wb.xlsx.writeBuffer();
 }
 
+/**
+ * Render a simple tabular workbook based on custom report spec mapping.
+ * title: sheet title
+ * result: { data: [...] } or { rows: [...] }
+ * spec: { columns: [{key,label}], periods, layout }
+ */
+// PUBLIC_INTERFACE
+async function renderCustomReport(title, result, spec = {}) {
+  const wb = new ExcelJS.Workbook();
+  const sheet = wb.addWorksheet(title || 'Custom Report', { views: [{ state: 'frozen', ySplit: 3 }] });
+
+  // Header
+  sheet.getCell('A1').value = title || 'Custom Report';
+  sheet.getCell('A1').font = { size: 14, bold: true, color: { argb: 'FF111827' } };
+  sheet.getCell('A2').value = `Generated at: ${new Date().toLocaleString()}`;
+  sheet.getCell('A2').font = { size: 9, color: { argb: 'FF6B7280' } };
+
+  sheet.addRow([]);
+  const cols = Array.isArray(spec.columns) ? spec.columns : [];
+  if (cols.length > 0) {
+    const headerRow = sheet.addRow(cols.map(c => c.label || c.key));
+    headerRow.eachCell(c => applyHeaderStyle(c));
+  }
+
+  const rows = Array.isArray(result?.data) ? result.data : (Array.isArray(result?.rows) ? result.rows : []);
+  if (rows.length > 0) {
+    if (cols.length > 0) {
+      rows.forEach(r => {
+        sheet.addRow(cols.map(c => {
+          const key = c.key || c.source || c.field;
+          return key ? r[key] : null;
+        }));
+      });
+    } else {
+      const keys = Object.keys(rows[0]);
+      sheet.addRow(keys);
+      rows.forEach(r => sheet.addRow(keys.map(k => r[k])));
+    }
+  } else {
+    sheet.addRow(['No data']);
+  }
+
+  return wb.xlsx.writeBuffer();
+}
+
 module.exports = {
   // PUBLIC_INTERFACE
   buildTrialBalanceWorkbook,
@@ -525,4 +570,6 @@ module.exports = {
   buildCashFlowWorkbook,
   // PUBLIC_INTERFACE
   buildSimpleKeyAmountWorkbook,
+  // PUBLIC_INTERFACE
+  renderCustomReport,
 };

@@ -35,8 +35,19 @@ const testConnection = async () => {
   }
 };
 
+async function safeRollback(client) {
+  if (!client) return;
+  try {
+    await client.query('ROLLBACK');
+  } catch (e) {
+    // ignore rollback errors
+  }
+}
+
 module.exports = {
   pool,
   testConnection,
   query: (text, params) => pool.query(text, params),
+  getClient: () => pool.connect(),
+  safeRollback,
 };

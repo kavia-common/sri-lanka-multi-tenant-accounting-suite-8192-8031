@@ -45,3 +45,55 @@ Examples:
 
 - Trial Balance with fiscal year fallback:
   /api/reports/v2/trial-balance?fiscal_year=2025&budget_source=prior_year
+
+## Custom Report Templates
+
+Use the Custom Reports API to create reusable templates that assemble fields, columns, periods, filters, and layout.
+
+Endpoints (requires Authorization header and x-company-id):
+- GET /api/custom-reports
+- POST /api/custom-reports
+- GET /api/custom-reports/:id
+- PUT /api/custom-reports/:id
+- DELETE /api/custom-reports/:id
+- POST /api/custom-reports/:id/execute?format=json|xlsx|pdf
+
+Template payload example (POST /api/custom-reports):
+{
+  "name": "Quarterly Trial Balance",
+  "description": "TB with Q1 vs prior year",
+  "category": "FINANCIAL",
+  "spec": {
+    "base_report": "trial_balance",
+    "periods": ["2025-01-01..2025-03-31"],
+    "compare_to": ["2024-01-01..2024-03-31"],
+    "columns": [
+      {"key": "code", "label": "Code"},
+      {"key": "name", "label": "Account"},
+      {"key": "total_debits", "label": "Debits"},
+      {"key": "total_credits", "label": "Credits"},
+      {"key": "balance", "label": "Balance"}
+    ],
+    "layout": {"group_by": "type"}
+  },
+  "fields": [
+    {"field_key": "account.code", "field_label": "Account Code", "data_type": "string"},
+    {"field_key": "account.name", "field_label": "Account Name", "data_type": "string"}
+  ]
+}
+
+Execution example:
+POST /api/custom-reports/{id}/execute?format=xlsx
+Body can override spec elements, e.g.:
+{
+  "period": ["2025-01-01..2025-03-31"],
+  "compare_to": ["2024-01-01..2024-03-31"]
+}
+
+Scheduling integration:
+Use existing /api/schedules endpoint with report_type set to "CUSTOM_TEMPLATE" and include options:
+{
+  "template_id": "<uuid>",
+  "format": "pdf|xlsx|json",
+  "params": { "period": ["2025-01-01..2025-03-31"] }
+}

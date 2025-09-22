@@ -126,6 +126,12 @@
 - GET /api/reports/balance-sheet
 - GET /api/reports/profit-loss
 
+### Custom Reports
+- CRUD and execute endpoints mounted at /api/custom-reports
+- Supports template spec (fields, columns, periods, filters, layout)
+- Exports: JSON, XLSX, PDF
+- Integrated with ReportingService
+
 ### Utility (3 endpoints)
 - GET / (health check)
 - GET /docs (API documentation)

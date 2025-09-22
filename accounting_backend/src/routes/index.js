@@ -10,6 +10,7 @@ const reportRoutes = require('./reports');
 const advancedReportRoutes = require('./advancedReports');
 const sriLankaComplianceRoutes = require('./sriLankaCompliance');
 const scheduleRoutes = require('./schedules');
+const customReportRoutes = require('./customReports');
 
 const router = express.Router();
 
@@ -53,5 +54,6 @@ router.use('/api/reports', reportRoutes);
 router.use('/api/reports', advancedReportRoutes); // exposes /api/reports/v2/*
 router.use('/api/reports', sriLankaComplianceRoutes); // exposes /api/reports/lk/*
 router.use('/api/schedules', scheduleRoutes);
+router.use('/api/custom-reports', customReportRoutes);
 
 module.exports = router;

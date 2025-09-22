@@ -68,6 +68,10 @@ const options = {
       {
         name: 'Reports',
         description: 'Financial reporting and analytics'
+      },
+      {
+        name: 'Custom Reports',
+        description: 'Create, manage, and execute custom financial report templates'
       }
     ]
   },
