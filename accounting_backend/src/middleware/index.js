@@ -1,4 +1,16 @@
-// This file will export middleware as the application grows
+const { authenticateToken } = require('./auth');
+const { validateCompanyAccess, optionalCompanyContext } = require('./companyContext');
+const { handleValidationErrors } = require('./validation');
+const { generalLimiter, authLimiter } = require('./rateLimiter');
+const { errorHandler, notFoundHandler } = require('./errorHandler');
+
 module.exports = {
-  // Add your middleware here
+  authenticateToken,
+  validateCompanyAccess,
+  optionalCompanyContext,
+  handleValidationErrors,
+  generalLimiter,
+  authLimiter,
+  errorHandler,
+  notFoundHandler,
 };

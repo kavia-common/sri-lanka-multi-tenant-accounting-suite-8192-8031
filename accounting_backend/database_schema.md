@@ -1,0 +1,380 @@
+# Database Schema for Multi-Tenant Accounting System
+
+This document describes the PostgreSQL database schema required for the accounting backend API.
+
+## Database Configuration
+
+The API expects the following environment variables to be set for database connection:
+- `DATABASE_URL` - Full PostgreSQL connection string
+- `DB_HOST` - Database host
+- `DB_PORT` - Database port (default: 5432)
+- `DB_NAME` - Database name
+- `DB_USER` - Database username
+- `DB_PASSWORD` - Database password
+
+## Required Tables
+
+### 1. users
+Stores user account information.
+
+```sql
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_active ON users(is_active);
+```
+
+### 2. companies
+Stores company information for multi-tenancy.
+
+```sql
+CREATE TABLE companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    code VARCHAR(10) UNIQUE NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(20),
+    address TEXT,
+    tax_number VARCHAR(50),
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_companies_code ON companies(code);
+CREATE INDEX idx_companies_active ON companies(is_active);
+```
+
+### 3. user_companies
+Junction table for user-company relationships.
+
+```sql
+CREATE TABLE user_companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL DEFAULT 'USER',
+    permissions JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, company_id)
+);
+
+CREATE INDEX idx_user_companies_user ON user_companies(user_id);
+CREATE INDEX idx_user_companies_company ON user_companies(company_id);
+```
+
+### 4. accounts
+Chart of accounts for each company.
+
+```sql
+CREATE TYPE account_type AS ENUM ('ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE');
+
+CREATE TABLE accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    code VARCHAR(20) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    type account_type NOT NULL,
+    parent_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    description TEXT,
+    balance DECIMAL(15,2) DEFAULT 0.00,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(company_id, code)
+);
+
+CREATE INDEX idx_accounts_company ON accounts(company_id);
+CREATE INDEX idx_accounts_type ON accounts(type);
+CREATE INDEX idx_accounts_parent ON accounts(parent_account_id);
+CREATE INDEX idx_accounts_active ON accounts(is_active);
+```
+
+### 5. transactions
+Main transaction records.
+
+```sql
+CREATE TABLE transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    description TEXT NOT NULL,
+    reference VARCHAR(100),
+    total_amount DECIMAL(15,2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_transactions_company ON transactions(company_id);
+CREATE INDEX idx_transactions_date ON transactions(date);
+CREATE INDEX idx_transactions_created ON transactions(created_at);
+```
+
+### 6. journal_entries
+Individual journal entries for double-entry bookkeeping.
+
+```sql
+CREATE TABLE journal_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    debit_amount DECIMAL(15,2) DEFAULT 0.00,
+    credit_amount DECIMAL(15,2) DEFAULT 0.00,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_debit_or_credit CHECK (
+        (debit_amount > 0 AND credit_amount = 0) OR 
+        (credit_amount > 0 AND debit_amount = 0)
+    )
+);
+
+CREATE INDEX idx_journal_entries_transaction ON journal_entries(transaction_id);
+CREATE INDEX idx_journal_entries_account ON journal_entries(account_id);
+CREATE INDEX idx_journal_entries_created ON journal_entries(created_at);
+```
+
+## Triggers for Updated At
+
+```sql
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_companies_updated_at BEFORE UPDATE ON companies
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_accounts_updated_at BEFORE UPDATE ON accounts
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_transactions_updated_at BEFORE UPDATE ON transactions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+```
+
+## Row Level Security (RLS)
+
+Enable row level security for multi-tenant data isolation:
+
+```sql
+-- Enable RLS on multi-tenant tables
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE journal_entries ENABLE ROW LEVEL SECURITY;
+
+-- Example RLS policies (to be implemented based on application context)
+-- These would be implemented when the database user context is available
+```
+
+## Sample Data
+
+```sql
+-- Insert sample user
+INSERT INTO users (email, password_hash, first_name, last_name) 
+VALUES ('admin@example.com', '$2b$12$hash_here', 'Admin', 'User');
+
+-- Insert sample company
+INSERT INTO companies (name, code, email) 
+VALUES ('Sample Company Ltd', 'SAMPLE', 'info@sample.com');
+
+-- Link user to company
+INSERT INTO user_companies (user_id, company_id, role, permissions)
+SELECT u.id, c.id, 'OWNER', '["ALL"]'::jsonb
+FROM users u, companies c 
+WHERE u.email = 'admin@example.com' AND c.code = 'SAMPLE';
+```
+
+## Notes
+
+1. All monetary amounts use DECIMAL(15,2) for precision
+2. UUIDs are used for all primary keys for better security and distribution
+3. Multi-tenancy is enforced through company_id foreign keys
+4. Journal entries enforce double-entry bookkeeping with check constraints
+5. Soft deletes are implemented through is_active flags where appropriate
+6. All timestamps are stored with timezone information
+7. The schema supports hierarchical chart of accounts through parent_account_id
+```
+
+Explanation: Creating a database initialization script
+````write file="sri-lanka-multi-tenant-accounting-suite-8192-8031/accounting_backend/init_database.sql"
+-- Multi-Tenant Accounting System Database Schema
+-- PostgreSQL 12+ required for gen_random_uuid()
+
+-- Create database extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Create custom types
+CREATE TYPE account_type AS ENUM ('ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE');
+
+-- Users table
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Companies table (multi-tenant)
+CREATE TABLE companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    code VARCHAR(10) UNIQUE NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(20),
+    address TEXT,
+    tax_number VARCHAR(50),
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User-Company relationship (many-to-many)
+CREATE TABLE user_companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL DEFAULT 'USER',
+    permissions JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, company_id)
+);
+
+-- Chart of Accounts
+CREATE TABLE accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    code VARCHAR(20) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    type account_type NOT NULL,
+    parent_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    description TEXT,
+    balance DECIMAL(15,2) DEFAULT 0.00,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(company_id, code)
+);
+
+-- Transactions (journal headers)
+CREATE TABLE transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    description TEXT NOT NULL,
+    reference VARCHAR(100),
+    total_amount DECIMAL(15,2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Journal Entries (double-entry bookkeeping)
+CREATE TABLE journal_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    debit_amount DECIMAL(15,2) DEFAULT 0.00,
+    credit_amount DECIMAL(15,2) DEFAULT 0.00,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_debit_or_credit CHECK (
+        (debit_amount > 0 AND credit_amount = 0) OR 
+        (credit_amount > 0 AND debit_amount = 0)
+    )
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_active ON users(is_active);
+
+CREATE INDEX idx_companies_code ON companies(code);
+CREATE INDEX idx_companies_active ON companies(is_active);
+
+CREATE INDEX idx_user_companies_user ON user_companies(user_id);
+CREATE INDEX idx_user_companies_company ON user_companies(company_id);
+
+CREATE INDEX idx_accounts_company ON accounts(company_id);
+CREATE INDEX idx_accounts_type ON accounts(type);
+CREATE INDEX idx_accounts_parent ON accounts(parent_account_id);
+CREATE INDEX idx_accounts_active ON accounts(is_active);
+CREATE INDEX idx_accounts_code ON accounts(company_id, code);
+
+CREATE INDEX idx_transactions_company ON transactions(company_id);
+CREATE INDEX idx_transactions_date ON transactions(date);
+CREATE INDEX idx_transactions_created ON transactions(created_at);
+
+CREATE INDEX idx_journal_entries_transaction ON journal_entries(transaction_id);
+CREATE INDEX idx_journal_entries_account ON journal_entries(account_id);
+CREATE INDEX idx_journal_entries_created ON journal_entries(created_at);
+
+-- Create function for updating timestamps
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create triggers for updated_at columns
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_companies_updated_at BEFORE UPDATE ON companies
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_accounts_updated_at BEFORE UPDATE ON accounts
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_transactions_updated_at BEFORE UPDATE ON transactions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Enable Row Level Security for multi-tenant isolation
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE journal_entries ENABLE ROW LEVEL SECURITY;
+
+-- Sample data for development (optional)
+-- Uncomment the following lines if you want sample data
+
+/*
+-- Sample user (password: "password123")
+INSERT INTO users (email, password_hash, first_name, last_name) 
+VALUES ('admin@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJEn.eplXiGo3K8m', 'Admin', 'User');
+
+-- Sample company
+INSERT INTO companies (name, code, email, phone, address, tax_number) 
+VALUES (
+    'Acme Corporation', 
+    'ACME', 
+    'info@acme.com', 
+    '+1-555-0123',
+    '123 Business St, City, State 12345',
+    'TAX123456789'
+);
+
+-- Link user to company as owner
+INSERT INTO user_companies (user_id, company_id, role, permissions)
+SELECT u.id, c.id, 'OWNER', '["ALL"]'::jsonb
+FROM users u, companies c 
+WHERE u.email = 'admin@example.com' AND c.code = 'ACME';
+*/
