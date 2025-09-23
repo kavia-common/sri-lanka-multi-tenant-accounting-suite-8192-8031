@@ -4,9 +4,9 @@ process.env.JWT_ISSUER = 'sl-accounting-suite';
 process.env.JWT_AUDIENCE = 'sl-accounting-frontend';
 process.env.LK_VAT_STANDARD_RATE = '0.15';
 
-// Mock the postgres repository with an in-memory adapter that mirrors methods used by services.
-// This prevents the need for actual PG connection and required PG_* env vars.
-const memory = (() => {
+// Mock the entire postgres.js module with a self-contained in-memory implementation.
+// Ensure no out-of-scope variables are referenced inside the factory.
+jest.mock('./src/repositories/postgres', () => {
   // Very simple in-memory structures, keyed by tenant
   const tenants = new Map();
 
@@ -91,15 +91,15 @@ const memory = (() => {
   }
 
   function matchFilter(row, filter) {
-    return Object.entries(filter).every(([k, v]) => {
-      return row[k] === v;
-    });
+    return Object.entries(filter).every(([k, v]) => row[k] === v);
   }
 
   async function list(table, filter = {}, { tenantId } = {}) {
     const t = ensureTenant(tenantId);
     const store = tableMap(t, table);
-    return Array.from(store.values()).filter((r) => matchFilter(r, filter)).sort((a, b) => Number(a.id) - Number(b.id));
+    return Array.from(store.values())
+      .filter((r) => matchFilter(r, filter))
+      .sort((a, b) => Number(a.id) - Number(b.id));
   }
 
   async function upsert(table, where, data, { tenantId, actorUserId }) {
@@ -121,7 +121,9 @@ const memory = (() => {
       balance = Number(existing.balance || 0);
       entries = existing.entries || [];
     }
-    const nextBal = Number((balance + Number(entry.debit || 0) - Number(entry.credit || 0)).toFixed(2));
+    const debit = Number(entry.debit || 0);
+    const credit = Number(entry.credit || 0);
+    const nextBal = Number((balance + debit - credit).toFixed(2));
     const nextEntries = [...entries, { ...entry, balance: nextBal }];
     const row = {
       id: composite,
@@ -137,26 +139,29 @@ const memory = (() => {
     return { balance: nextBal, entries: nextEntries };
   }
 
-  return { insert, update, remove, getById, list, upsert, upsertLedgerBalance };
-})();
+  // Provide a minimal pool stub for health service which does pool.query('SELECT 1')
+  const pool = {
+    async query(sql) {
+      if (typeof sql === 'string' && sql.toUpperCase().includes('SELECT 1')) {
+        return { rows: [{ '?column?': 1 }] };
+      }
+      // Not used in tests due to repository mocking
+      return { rows: [] };
+    },
+  };
 
-// Provide a minimal pool stub for health service which does pool.query('SELECT 1')
-const pool = {
-  async query(sql) {
-    if (typeof sql === 'string' && sql.toUpperCase().includes('SELECT 1')) {
-      return { rows: [{ '?column?': 1 }] };
-    }
-    // Not used in tests due to repository mocking
-    return { rows: [] };
-  },
-};
-
-// Mock the entire postgres.js module
-jest.mock('./src/repositories/postgres', () => ({
-  __esModule: true,
-  ...memory,
-  pool,
-}));
+  return {
+    __esModule: true,
+    insert,
+    update,
+    remove,
+    getById,
+    list,
+    upsert,
+    upsertLedgerBalance,
+    pool,
+  };
+});
 
 // Avoid running real DB schema init during app import by mocking bootstrap.initSchema to a no-op
 jest.mock('./src/repositories/bootstrap', () => ({
