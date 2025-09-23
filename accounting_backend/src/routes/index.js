@@ -1,8 +1,16 @@
+'use strict';
 const express = require('express');
 const healthController = require('../controllers/health');
 
+const authRoutes = require('./auth');
+const userRoutes = require('./users');
+const companyRoutes = require('./companies');
+const coaRoutes = require('./chartOfAccounts');
+const journalRoutes = require('./journal');
+const ledgerRoutes = require('./ledger');
+const masterRoutes = require('./masters');
+
 const router = express.Router();
-// Health endpoint
 
 /**
  * @swagger
@@ -31,5 +39,16 @@ const router = express.Router();
  *                   example: development
  */
 router.get('/', healthController.check.bind(healthController));
+
+// Public
+router.use('/auth', authRoutes);
+
+// Protected and tenant-scoped
+router.use('/users', userRoutes);
+router.use('/companies', companyRoutes);
+router.use('/chart_of_accounts', coaRoutes);
+router.use('/journal_entries', journalRoutes);
+router.use('/general_ledger', ledgerRoutes);
+router.use('/', masterRoutes);
 
 module.exports = router;
