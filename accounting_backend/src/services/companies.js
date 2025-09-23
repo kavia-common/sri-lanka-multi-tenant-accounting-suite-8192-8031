@@ -1,6 +1,6 @@
 'use strict';
 
-const repo = require('../repositories/memory');
+const db = require('../repositories/postgres');
 const { notFound } = require('../utils/errors');
 
 class CompanyService {
@@ -10,17 +10,16 @@ class CompanyService {
    */
   async create(tenantId, actorUserId, payload) {
     /** This is a public function. */
-    const defaults = {
+    const company = await db.insert('companies', {
       name: payload.name,
-      taxNumber: payload.taxNumber || null,
+      tax_number: payload.taxNumber || null,
       currency: payload.currency || 'LKR',
       country: 'LK',
       address: payload.address || null,
-      fiscalYearStart: payload.fiscalYearStart || '04-01', // Sri Lankan common fiscal year
+      fiscal_year_start: payload.fiscalYearStart || '04-01',
       settings: payload.settings || {},
       active: true,
-    };
-    const company = repo.create(tenantId, 'companies', { ...defaults, _actorUserId: actorUserId });
+    }, { tenantId, actorUserId });
     return company;
   }
 
@@ -30,7 +29,7 @@ class CompanyService {
    */
   async get(tenantId, id) {
     /** This is a public function. */
-    const c = repo.getById(tenantId, 'companies', id);
+    const c = await db.getById('companies', id, { tenantId });
     if (!c) throw notFound('Company not found');
     return c;
   }
@@ -41,7 +40,7 @@ class CompanyService {
    */
   async list(tenantId) {
     /** This is a public function. */
-    return repo.list(tenantId, 'companies');
+    return db.list('companies', {}, { tenantId });
   }
 
   /**
@@ -50,9 +49,17 @@ class CompanyService {
    */
   async update(tenantId, actorUserId, id, patch) {
     /** This is a public function. */
-    const c = repo.getById(tenantId, 'companies', id);
+    const c = await db.getById('companies', id, { tenantId });
     if (!c) throw notFound('Company not found');
-    return repo.update(tenantId, 'companies', id, { ...patch, _actorUserId: actorUserId });
+    const mapped = {};
+    if (patch.name !== undefined) mapped.name = patch.name;
+    if (patch.taxNumber !== undefined) mapped.tax_number = patch.taxNumber;
+    if (patch.currency !== undefined) mapped.currency = patch.currency;
+    if (patch.address !== undefined) mapped.address = patch.address;
+    if (patch.fiscalYearStart !== undefined) mapped.fiscal_year_start = patch.fiscalYearStart;
+    if (patch.settings !== undefined) mapped.settings = patch.settings;
+    if (patch.active !== undefined) mapped.active = patch.active;
+    return db.update('companies', id, mapped, { tenantId, actorUserId });
   }
 
   /**
@@ -61,8 +68,8 @@ class CompanyService {
    */
   async remove(tenantId, actorUserId, id) {
     /** This is a public function. */
-    const ok = repo.update(tenantId, 'companies', id, { active: false, _actorUserId: actorUserId });
-    if (!ok) throw notFound('Company not found');
+    const updated = await db.update('companies', id, { active: false }, { tenantId, actorUserId });
+    if (!updated) throw notFound('Company not found');
     return { success: true };
   }
 }

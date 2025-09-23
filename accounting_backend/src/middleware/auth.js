@@ -1,7 +1,7 @@
 'use strict';
 
 const { verifyJwt } = require('../utils/auth');
-const { unauthorized, forbidden } = require('../utils/errors');
+const { unauthorized } = require('../utils/errors');
 
 /**
  * Extract bearer token from Authorization header.

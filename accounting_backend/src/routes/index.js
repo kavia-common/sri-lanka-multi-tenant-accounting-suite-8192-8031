@@ -9,6 +9,7 @@ const coaRoutes = require('./chartOfAccounts');
 const journalRoutes = require('./journal');
 const ledgerRoutes = require('./ledger');
 const masterRoutes = require('./masters');
+const swaggerSpec = require('../../swagger');
 
 const router = express.Router();
 
@@ -39,6 +40,11 @@ const router = express.Router();
  *                   example: development
  */
 router.get('/', healthController.check.bind(healthController));
+
+// serve openapi json
+router.get('/openapi.json', (req, res) => {
+  res.json(swaggerSpec);
+});
 
 // Public
 router.use('/auth', authRoutes);

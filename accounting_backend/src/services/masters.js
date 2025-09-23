@@ -1,7 +1,15 @@
 'use strict';
 
-const repo = require('../repositories/memory');
+const db = require('../repositories/postgres');
 const { notFound } = require('../utils/errors');
+
+const entityTableMap = {
+  customers: 'customers',
+  vendors: 'vendors',
+  bankAccounts: 'bank_accounts',
+  taxRates: 'tax_rates',
+  currencies: 'currencies',
+};
 
 class MasterService {
   /**
@@ -10,7 +18,8 @@ class MasterService {
    */
   async create(tenantId, actorUserId, entity, companyId, payload) {
     /** This is a public function. */
-    return repo.create(tenantId, entity, { ...payload, companyId, _actorUserId: actorUserId });
+    const table = entityTableMap[entity];
+    return db.insert(table, { ...payload, company_id: companyId }, { tenantId, actorUserId });
   }
 
   /**
@@ -19,7 +28,8 @@ class MasterService {
    */
   async get(tenantId, entity, id) {
     /** This is a public function. */
-    const v = repo.getById(tenantId, entity, id);
+    const table = entityTableMap[entity];
+    const v = await db.getById(table, id, { tenantId });
     if (!v) throw notFound(`${entity} not found`);
     return v;
   }
@@ -30,7 +40,8 @@ class MasterService {
    */
   async list(tenantId, entity, companyId) {
     /** This is a public function. */
-    return repo.list(tenantId, entity, { companyId });
+    const table = entityTableMap[entity];
+    return db.list(table, { company_id: companyId }, { tenantId });
   }
 
   /**
@@ -39,9 +50,10 @@ class MasterService {
    */
   async update(tenantId, actorUserId, entity, id, patch) {
     /** This is a public function. */
-    const v = repo.getById(tenantId, entity, id);
-    if (!v) throw notFound(`${entity} not found`);
-    return repo.update(tenantId, entity, id, { ...patch, _actorUserId: actorUserId });
+    const table = entityTableMap[entity];
+    const existing = await db.getById(table, id, { tenantId });
+    if (!existing) throw notFound(`${entity} not found`);
+    return db.update(table, id, patch, { tenantId, actorUserId });
   }
 
   /**
@@ -50,7 +62,8 @@ class MasterService {
    */
   async remove(tenantId, actorUserId, entity, id) {
     /** This is a public function. */
-    const ok = repo.delete(tenantId, entity, id, actorUserId);
+    const table = entityTableMap[entity];
+    const ok = await db.remove(table, id, { tenantId });
     if (!ok) throw notFound(`${entity} not found`);
     return { success: true };
   }

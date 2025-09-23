@@ -1,6 +1,6 @@
 'use strict';
 
-const repo = require('../repositories/memory');
+const db = require('../repositories/postgres');
 const { notFound, conflict } = require('../utils/errors');
 
 class JournalService {
@@ -18,8 +18,8 @@ class JournalService {
     let totalCredit = 0;
     const normalized = [];
     for (const l of lines) {
-      const acc = repo.getById(tenantId, 'chartOfAccounts', l.accountId);
-      if (!acc || acc.companyId !== companyId) throw notFound('Account not found for company');
+      const acc = await db.getById('chart_of_accounts', l.accountId, { tenantId });
+      if (!acc || Number(acc.company_id) !== Number(companyId)) throw notFound('Account not found for company');
       const debit = Number(l.debit || 0);
       const credit = Number(l.credit || 0);
       if ((debit > 0 && credit > 0) || (debit === 0 && credit === 0)) {
@@ -28,7 +28,7 @@ class JournalService {
       totalDebit += debit;
       totalCredit += credit;
       normalized.push({
-        accountId: l.accountId,
+        accountId: Number(l.accountId),
         debit,
         credit,
         description: l.description || '',
@@ -39,34 +39,30 @@ class JournalService {
       throw conflict('Debits and credits must be equal');
     }
 
-    const je = repo.create(tenantId, 'journalEntries', {
-      companyId,
+    const je = await db.insert('journal_entries', {
+      company_id: companyId,
       date: date || new Date().toISOString().slice(0, 10),
       reference: reference || null,
       memo: memo || null,
       lines: normalized,
       status: 'posted',
-      _actorUserId: actorUserId,
-    });
+    }, { tenantId, actorUserId });
 
-    // Post to ledger: create or update per-account running balances
+    // Post to ledger: create/update per-account running balances (materialized)
     for (const line of normalized) {
-      const key = `${companyId}:${line.accountId}`;
-      const current = repo.getById(tenantId, 'ledger', key) || { id: key, companyId, accountId: line.accountId, balance: 0, entries: [] };
-      const nextBal = Number((current.balance + line.debit - line.credit).toFixed(2));
-      current.balance = nextBal;
-      current.entries.push({
-        journalId: je.id,
-        date: je.date,
-        reference: je.reference,
-        memo: line.description,
-        debit: line.debit,
-        credit: line.credit,
-        balance: nextBal,
+      await db.upsertLedgerBalance({
+        tenantId,
+        companyId,
+        accountId: line.accountId,
+        entry: {
+          journalId: je.id,
+          date: je.date,
+          reference: je.reference,
+          memo: line.description,
+          debit: line.debit,
+          credit: line.credit,
+        },
       });
-      // store ledger keyed by composite id
-      // since our generic repo expects numeric ids, we simulate by upsert on id
-      repo.upsert(tenantId, 'ledger', { id: key }, { ...current, _actorUserId: actorUserId });
     }
 
     return je;
@@ -78,10 +74,11 @@ class JournalService {
    */
   async list(tenantId, companyId, { from, to } = {}) {
     /** This is a public function. */
-    let arr = repo.list(tenantId, 'journalEntries', { companyId });
-    if (from) arr = arr.filter((j) => j.date >= from);
-    if (to) arr = arr.filter((j) => j.date <= to);
-    return arr;
+    const filter = { company_id: companyId };
+    let rows = await db.list('journal_entries', filter, { tenantId });
+    if (from) rows = rows.filter((j) => String(j.date) >= String(from));
+    if (to) rows = rows.filter((j) => String(j.date) <= String(to));
+    return rows;
   }
 
   /**
@@ -90,7 +87,7 @@ class JournalService {
    */
   async get(tenantId, id) {
     /** This is a public function. */
-    const je = repo.getById(tenantId, 'journalEntries', id);
+    const je = await db.getById('journal_entries', id, { tenantId });
     if (!je) throw notFound('Journal entry not found');
     return je;
   }

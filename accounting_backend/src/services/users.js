@@ -1,6 +1,6 @@
 'use strict';
 
-const repo = require('../repositories/memory');
+const db = require('../repositories/postgres');
 const { hashPassword } = require('../utils/auth');
 const { notFound, conflict } = require('../utils/errors');
 
@@ -11,10 +11,10 @@ class UserService {
    */
   async create(tenantId, actorUserId, { email, name, roles = ['accountant'], password, active = true }) {
     /** This is a public function. */
-    const existing = repo.list(tenantId, 'users', { email })[0];
-    if (existing) throw conflict('Email already exists');
-    const passwordHash = await hashPassword(password || Math.random().toString(36).slice(2));
-    const user = repo.create(tenantId, 'users', { email, name, roles, active, passwordHash, _actorUserId: actorUserId });
+    const existing = await db.list('users', { email }, { tenantId });
+    if (existing.length > 0) throw conflict('Email already exists');
+    const password_hash = await hashPassword(password || Math.random().toString(36).slice(2));
+    const user = await db.insert('users', { email, name, roles, active, password_hash }, { tenantId, actorUserId });
     return this._mask(user);
   }
 
@@ -24,7 +24,7 @@ class UserService {
    */
   async get(tenantId, id) {
     /** This is a public function. */
-    const u = repo.getById(tenantId, 'users', id);
+    const u = await db.getById('users', id, { tenantId });
     if (!u) throw notFound('User not found');
     return this._mask(u);
   }
@@ -35,7 +35,8 @@ class UserService {
    */
   async list(tenantId) {
     /** This is a public function. */
-    return repo.list(tenantId, 'users').map((u) => this._mask(u));
+    const rows = await db.list('users', {}, { tenantId });
+    return rows.map((u) => this._mask(u));
   }
 
   /**
@@ -44,9 +45,14 @@ class UserService {
    */
   async update(tenantId, actorUserId, id, { name, roles, active }) {
     /** This is a public function. */
-    const u = repo.getById(tenantId, 'users', id);
+    const u = await db.getById('users', id, { tenantId });
     if (!u) throw notFound('User not found');
-    const updated = repo.update(tenantId, 'users', id, { name: name ?? u.name, roles: roles ?? u.roles, active: active ?? u.active, _actorUserId: actorUserId });
+    const patch = {
+      name: name ?? u.name,
+      roles: roles ?? u.roles,
+      active: active ?? u.active,
+    };
+    const updated = await db.update('users', id, patch, { tenantId, actorUserId });
     return this._mask(updated);
   }
 
@@ -56,13 +62,14 @@ class UserService {
    */
   async remove(tenantId, actorUserId, id) {
     /** This is a public function. */
-    const ok = repo.delete(tenantId, 'users', id, actorUserId);
+    const ok = await db.remove('users', id, { tenantId });
     if (!ok) throw notFound('User not found');
     return { success: true };
   }
 
   _mask(user) {
-    const { passwordHash, ...rest } = user;
+    // Map DB column to API shape by removing password_hash
+    const { password_hash, ...rest } = user;
     return rest;
   }
 }

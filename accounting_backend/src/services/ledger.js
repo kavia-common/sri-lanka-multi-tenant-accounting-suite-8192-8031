@@ -1,6 +1,6 @@
 'use strict';
 
-const repo = require('../repositories/memory');
+const db = require('../repositories/postgres');
 const { notFound } = require('../utils/errors');
 
 class LedgerService {
@@ -10,15 +10,16 @@ class LedgerService {
    */
   async accountStatement(tenantId, companyId, accountId) {
     /** This is a public function. */
-    const acc = repo.getById(tenantId, 'chartOfAccounts', accountId);
-    if (!acc || acc.companyId !== companyId) throw notFound('Account not found');
+    const acc = await db.getById('chart_of_accounts', accountId, { tenantId });
+    if (!acc || Number(acc.company_id) !== Number(companyId)) throw notFound('Account not found');
 
     const compositeId = `${companyId}:${accountId}`;
-    const ledger = repo.getById(tenantId, 'ledger', compositeId) || { balance: 0, entries: [] };
+    const rows = await db.list('ledger_balances', { id: compositeId }, { tenantId });
+    const l = rows[0] || { balance: 0, entries: [] };
     return {
-      account: { id: accountId, code: acc.code, name: acc.name, type: acc.type },
-      balance: ledger.balance || 0,
-      entries: ledger.entries || [],
+      account: { id: Number(accountId), code: acc.code, name: acc.name, type: acc.type },
+      balance: Number(l.balance || 0),
+      entries: l.entries || [],
     };
   }
 
@@ -28,12 +29,16 @@ class LedgerService {
    */
   async trialBalance(tenantId, companyId) {
     /** This is a public function. */
-    const accounts = repo.list(tenantId, 'chartOfAccounts', { companyId });
-    return accounts.map((a) => {
-      const compositeId = `${companyId}:${a.id}`;
-      const l = repo.getById(tenantId, 'ledger', compositeId) || { balance: 0 };
-      return { accountId: a.id, code: a.code, name: a.name, type: a.type, balance: l.balance || 0 };
-    });
+    const accounts = await db.list('chart_of_accounts', { company_id: companyId }, { tenantId });
+    const balances = await db.list('ledger_balances', { company_id: companyId }, { tenantId });
+    const byAccount = new Map(balances.map((b) => [Number(b.account_id), Number(b.balance || 0)]));
+    return accounts.map((a) => ({
+      accountId: a.id,
+      code: a.code,
+      name: a.name,
+      type: a.type,
+      balance: byAccount.get(Number(a.id)) || 0,
+    }));
   }
 }
 

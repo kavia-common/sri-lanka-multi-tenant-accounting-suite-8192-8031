@@ -3,9 +3,15 @@ const express = require('express');
 const routes = require('./routes');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('../swagger');
+const { initSchema } = require('./repositories/bootstrap');
 
 // Initialize express app
 const app = express();
+
+// Initialize DB schema on boot (idempotent)
+initSchema().catch((e) => {
+  console.error('Database schema initialization failed:', e.message);
+});
 
 app.use(cors({
   origin: '*',
@@ -46,10 +52,14 @@ app.use('/', routes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
+  const status = err.status || 500;
+  const code = err.code || 'INTERNAL_ERROR';
+  const message = err.message || 'Internal Server Error';
+  console.error('Error:', code, message, err.details || err.stack);
+  res.status(status).json({
     status: 'error',
-    message: 'Internal Server Error',
+    code,
+    message,
   });
 });
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const repo = require('../repositories/memory');
+const db = require('../repositories/postgres');
 const { hashPassword, comparePassword, signJwt } = require('../utils/auth');
 const { conflict, notFound, unauthorized } = require('../utils/errors');
 
@@ -11,17 +11,17 @@ class AuthService {
    */
   async register({ tenantId, email, password, name, roles = ['admin'] }) {
     /** This is a public function. */
-    const existing = repo.list(tenantId, 'users', { email })[0];
-    if (existing) throw conflict('Email already registered');
+    const existing = await db.list('users', { email }, { tenantId });
+    if (existing.length > 0) throw conflict('Email already registered');
 
-    const passwordHash = await hashPassword(password);
-    const user = repo.create(tenantId, 'users', {
+    const password_hash = await hashPassword(password);
+    const user = await db.insert('users', {
       email,
       name,
-      passwordHash,
+      password_hash,
       roles,
       active: true,
-    });
+    }, { tenantId, actorUserId: null });
 
     return { id: user.id, email: user.email, name: user.name, roles: user.roles, active: user.active };
   }
@@ -32,14 +32,15 @@ class AuthService {
    */
   async login({ tenantId, email, password, companyId = null }) {
     /** This is a public function. */
-    const user = repo.list(tenantId, 'users', { email })[0];
+    const users = await db.list('users', { email }, { tenantId });
+    const user = users[0];
     if (!user) throw notFound('User not found');
     if (!user.active) throw unauthorized('User is inactive');
-    const ok = await comparePassword(password, user.passwordHash);
+    const ok = await comparePassword(password, user.password_hash);
     if (!ok) throw unauthorized('Invalid credentials');
 
     if (companyId) {
-      const company = repo.getById(tenantId, 'companies', companyId);
+      const company = await db.getById('companies', companyId, { tenantId });
       if (!company) throw notFound('Company not found for tenant');
     }
 
