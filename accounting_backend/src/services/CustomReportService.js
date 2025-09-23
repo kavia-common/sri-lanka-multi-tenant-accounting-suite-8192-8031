@@ -59,7 +59,7 @@ class CustomReportService {
       const revision = insertRevisionRes.rows[0];
 
       await client.query(
-        `UPDATE custom_report_templates SET current_revision_id = $1 WHERE id = $2`,
+        'UPDATE custom_report_templates SET current_revision_id = $1 WHERE id = $2',
         [revision.id, template.id]
       );
 
@@ -99,7 +99,7 @@ class CustomReportService {
   static async listTemplates(companyId, opts = {}) {
     const { q, limit = 50, offset = 0, favorites = false } = opts;
     const params = [companyId];
-    let where = `company_id = $1`;
+    let where = 'company_id = $1';
     if (favorites) {
       params.push(true);
       where += ` AND is_favorite = $${params.length}`;
@@ -181,11 +181,11 @@ class CustomReportService {
   static async updateTemplate(companyId, templateId, payload, userId) {
     const client = await db.getClient();
     try {
-      await client.query("BEGIN");
+      await client.query('BEGIN');
 
       // Ensure template belongs to company
       const checkRes = await client.query(
-        `SELECT id, name FROM custom_report_templates WHERE id = $1 AND company_id = $2`,
+        'SELECT id, name FROM custom_report_templates WHERE id = $1 AND company_id = $2',
         [templateId, companyId]
       );
       if (checkRes.rowCount === 0) {
@@ -229,12 +229,12 @@ class CustomReportService {
       // Manage fields if provided: replace all
       if (Array.isArray(fields)) {
         await client.query(
-          `DELETE FROM custom_report_template_fields WHERE template_id = $1`,
+          'DELETE FROM custom_report_template_fields WHERE template_id = $1',
           [templateId]
         );
         for (const f of fields) {
           await client.query(
-            `INSERT INTO custom_report_template_fields (template_id, field_key, field_label, data_type) VALUES ($1, $2, $3, $4)`,
+            'INSERT INTO custom_report_template_fields (template_id, field_key, field_label, data_type) VALUES ($1, $2, $3, $4)',
             [templateId, f.field_key, f.field_label || null, f.data_type || null]
           );
         }
@@ -243,7 +243,7 @@ class CustomReportService {
       // New revision if spec is provided
       if (spec !== undefined && spec !== null) {
         const lastVerRes = await client.query(
-          `SELECT COALESCE(MAX(version), 0) AS v FROM custom_report_template_revisions WHERE template_id = $1`,
+          'SELECT COALESCE(MAX(version), 0) AS v FROM custom_report_template_revisions WHERE template_id = $1',
           [templateId]
         );
         const nextVersion = toInt(lastVerRes.rows[0].v, 0) + 1;
@@ -256,7 +256,7 @@ class CustomReportService {
           [templateId, nextVersion, JSON.stringify(spec), notes || null, userId || null]
         );
         await client.query(
-          `UPDATE custom_report_templates SET current_revision_id = $1 WHERE id = $2`,
+          'UPDATE custom_report_templates SET current_revision_id = $1 WHERE id = $2',
           [revRes.rows[0].id, templateId]
         );
       }
@@ -279,7 +279,7 @@ class CustomReportService {
    */
   static async deleteTemplate(companyId, templateId) {
     const res = await db.query(
-      `DELETE FROM custom_report_templates WHERE id = $1 AND company_id = $2`,
+      'DELETE FROM custom_report_templates WHERE id = $1 AND company_id = $2',
       [templateId, companyId]
     );
     return res.rowCount > 0;
